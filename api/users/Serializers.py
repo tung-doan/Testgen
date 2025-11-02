@@ -53,29 +53,68 @@ class customUserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(ModelSerializer):
+    password = serializers.CharField(max_length=150, write_only=True)
+    confirm_password = serializers.CharField(max_length=150, write_only=True)
+    
     class Meta:
         model = User
-        fields = ('username', 'date_of_birth', 'gender', 'email', 'password')  # Include the password field in the serializer
+        fields = ('username', 'date_of_birth', 'gender', 'email', 'password', 'confirm_password')
         extra_kwargs = {
-            'password': {'write_only': True}
-    }
+            'password': {'write_only': True},
+            'confirm_password': {'write_only': True}
+        }
     
     def validate(self, attrs):
         email = attrs.get('email', '')
         username = attrs.get('username', '')
+        password = attrs.get('password')
+        confirm_password = attrs.get('confirm_password')
+        
+        # Validate username
         if not username.isalnum():
-            raise serializers.ValidationError(default_error_messages['invalid_username'])
+            raise serializers.ValidationError({
+                'username': default_error_messages.get('invalid username', 'Username must be alphanumeric')
+            })
+        
+        # Validate email
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError({
+                'email': 'Email already exists'
+            })
+        
+        # Validate username uniqueness
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError({
+                'username': 'Username already exists'
+            })
+        
+        # Validate password match
+        if password != confirm_password:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        
+        # Validate password strength (optional)
+        if len(password) < 6:
+            raise serializers.ValidationError({
+                'password': 'Password must be at least 6 characters long'
+            })
+        
         return attrs
 
     def create(self, validated_data):
-        # Mã hóa mật khẩu bằng bcrypt
+        # Remove confirm_password before creating user
+        validated_data.pop('confirm_password', None)
+        
+        # Create user
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            date_of_birth=validated_data['date_of_birth'],
-            gender=validated_data['gender'],
+            date_of_birth=validated_data.get('date_of_birth'),
+            gender=validated_data.get('gender'),
         )
         user.set_password(validated_data['password'])
+        user.is_authorized = True  # Auto-authorize user (or set to False if you want manual approval)
         user.save()
         return user
     

@@ -1,11 +1,17 @@
-'use client'
+"use client";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import React, { useState } from "react";
 import axios from "axios";
 import Router from "next/navigation";
@@ -35,20 +41,28 @@ export default function Frame() {
       return;
     }
 
-    if (!username || !email || !password || !confirmPassword || !gender || !dob) {
+    if (
+      !username ||
+      !email ||
+      !password ||
+      !confirmPassword ||
+      !gender ||
+      !dob
+    ) {
       alert("Please fill in all fields!");
       setIsSubmitting(false);
       return;
     }
 
-    axios.post(apiurl + "users/register/", {
-      username,
-      email,
-      password,
-      confirm_password: confirmPassword,
-      gender,
-      date_of_birth: dob,
-    })
+    axios
+      .post(apiurl + "users/register/", {
+        username,
+        email,
+        password,
+        confirm_password: confirmPassword,
+        gender,
+        date_of_birth: dob,
+      })
       .then((response) => {
         console.log("Registration successful:", response.data);
         router.push("/login");
@@ -67,7 +81,7 @@ export default function Frame() {
 
   return (
     <>
-    {isSubmitting && <LoadingScreen />}
+      {isSubmitting && <LoadingScreen />}
       <Header />
       <div className="flex justify-center items-center min-h-screen bg-[#f3f7f5] p-6">
         <Card className="w-full max-w-xl p-8 rounded-3xl shadow-xl bg-white border-none">
@@ -76,13 +90,23 @@ export default function Frame() {
             {/* Username */}
             <div className="space-y-4 m-3">
               <Label htmlFor="username">Username</Label>
-              <Input id="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
+              <Input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
             </div>
 
             {/* Email */}
             <div className="space-y-2 m-3">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
 
             {/* Gender */}
@@ -93,9 +117,9 @@ export default function Frame() {
                   <SelectValue placeholder="Select your gender" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Male">Male</SelectItem>
-                  <SelectItem value="Female">Female</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
+                  <SelectItem value="M">Male</SelectItem>
+                  <SelectItem value="F">Female</SelectItem>
+                  <SelectItem value="O">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -103,19 +127,34 @@ export default function Frame() {
             {/* Date of Birth */}
             <div className="space-y-2 m-3">
               <Label htmlFor="dob">Date of Birth</Label>
-              <Input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+              <Input
+                id="dob"
+                type="date"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+              />
             </div>
 
             {/* Password */}
             <div className="space-y-2 m-3">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             </div>
 
             {/* Confirm Password */}
             <div className="space-y-2 m-3">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+              <Input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
             </div>
 
             <Separator className="my-4" />
