@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework import serializers
 from .models import Classroom, Student
 from .serializers import ClassroomSerializer, ClassroomCreateSerializer, StudentSerializer
-from exam.models import Submission
+from exam.models import PaperSubmission
 from django.shortcuts import get_object_or_404
 
 class ClassroomViewSet(viewsets.ModelViewSet):
@@ -39,7 +39,7 @@ class ClassroomViewSet(viewsets.ModelViewSet):
 
         # Lấy bài nộp của từng sinh viên
         for student in students:
-            submission = Submission.objects.filter(student=student).first()
+            submission = PaperSubmission.objects.filter(student=student).first()
             if submission:
                 student.submission = submission
             students_data.append(student)
@@ -81,6 +81,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                 return Response({"error": "You are not authorized to delete this student."}, status=status.HTTP_403_FORBIDDEN)
             
             # Xóa các bài nộp liên quan trước khi xóa sinh viên
-            Submission.objects.filter(student=instance).delete()
+            PaperSubmission.objects.filter(student=instance).delete()
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)

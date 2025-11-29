@@ -74,14 +74,20 @@ export default function ClassroomDetail({ params }) {
   const [isAddSubmissionModalOpen, setIsAddSubmissionModalOpen] =
     useState(false);
   const [currentStudentId, setCurrentStudentId] = useState(null);
+
+  // FIX: Khởi tạo với giá trị string rõ ràng
   const [currentStudentInfo, setCurrentStudentInfo] = useState({
     name: "",
     date_of_birth: "",
+    student_id: "",
   });
+
+  // FIX: Đảm bảo tất cả fields là string, không phải undefined
   const [newStudentData, setNewStudentData] = useState({
     name: "",
     date_of_birth: "",
     student_id: "",
+    password: "",
   });
 
   const [submissionData, setSubmissionData] = useState({
@@ -133,15 +139,37 @@ export default function ClassroomDetail({ params }) {
         return;
       }
 
-      await addStudent(id, {
+      // FIX: Tạo payload chỉ với các giá trị có nội dung
+      const payload = {
         name: newStudentData.name,
         student_id: newStudentData.student_id,
-        date_of_birth: newStudentData.date_of_birth || null,
-      });
+      };
+
+      // Chỉ thêm date_of_birth nếu có giá trị
+      if (
+        newStudentData.date_of_birth &&
+        newStudentData.date_of_birth.trim() !== ""
+      ) {
+        payload.date_of_birth = newStudentData.date_of_birth;
+      }
+
+      // Chỉ thêm password nếu có giá trị
+      if (newStudentData.password && newStudentData.password.trim() !== "") {
+        payload.password = newStudentData.password;
+      }
+
+      await addStudent(id, payload);
 
       alert("Student added successfully!");
       setIsAddStudentModalOpen(false);
-      setNewStudentData({ name: "", date_of_birth: "", student_id: "" });
+
+      // FIX: Reset về giá trị string rõ ràng
+      setNewStudentData({
+        name: "",
+        date_of_birth: "",
+        student_id: "",
+        password: "",
+      });
 
       const studentsData = await getStudents(id);
       setStudents(studentsData);
@@ -174,10 +202,12 @@ export default function ClassroomDetail({ params }) {
     const student = students.find((s) => s.id === studentId);
     if (student) {
       setCurrentStudentId(studentId);
+
+      // FIX: Đảm bảo tất cả values là string
       setCurrentStudentInfo({
-        name: student.name || "N/A",
-        date_of_birth: student.date_of_birth || "N/A",
-        student_id: student.student_id || "N/A",
+        name: student.name || "",
+        date_of_birth: student.date_of_birth || "",
+        student_id: student.student_id || "",
       });
       setIsAddSubmissionModalOpen(true);
     }
@@ -202,6 +232,8 @@ export default function ClassroomDetail({ params }) {
 
       alert("Submission uploaded successfully!");
       setIsAddSubmissionModalOpen(false);
+
+      // FIX: Reset về giá trị mặc định rõ ràng
       setSubmissionData({ testId: "", submissionImage: null });
       setCurrentStudentInfo({ name: "", date_of_birth: "", student_id: "" });
 
@@ -216,9 +248,8 @@ export default function ClassroomDetail({ params }) {
   };
 
   const handleRowClick = (studentName, event) => {
-    // Kiểm tra xem click có phải từ action buttons không
     if (event.target.closest("button")) {
-      return; // Không navigate nếu click vào button
+      return;
     }
 
     const params = new URLSearchParams();
@@ -509,7 +540,6 @@ export default function ClassroomDetail({ params }) {
                                 )}
                               </TableCell>
                               <TableCell>
-                                {/* Actions - Always visible, scale up on hover */}
                                 <div className="flex items-center justify-center gap-2">
                                   <Button
                                     onClick={(e) =>
@@ -585,6 +615,7 @@ export default function ClassroomDetail({ params }) {
           </DialogHeader>
 
           <div className="space-y-5 py-4">
+            {/* Full Name */}
             <div className="space-y-2">
               <Label
                 htmlFor="name"
@@ -604,6 +635,7 @@ export default function ClassroomDetail({ params }) {
               />
             </div>
 
+            {/* Student ID */}
             <div className="space-y-2">
               <Label
                 htmlFor="student_id"
@@ -626,6 +658,7 @@ export default function ClassroomDetail({ params }) {
               />
             </div>
 
+            {/* Date of Birth - FIX: Thêm fallback || "" */}
             <div className="space-y-2">
               <Label
                 htmlFor="date_of_birth"
@@ -638,13 +671,38 @@ export default function ClassroomDetail({ params }) {
               <Input
                 id="date_of_birth"
                 type="date"
-                value={newStudentData.date_of_birth}
+                value={newStudentData.date_of_birth || ""}
                 onChange={(e) =>
                   setNewStudentData({
                     ...newStudentData,
-                    date_of_birth: e.target.value,
+                    date_of_birth: e.target.value || "",
                   })
                 }
+                className="w-full"
+              />
+            </div>
+
+            {/* Password - FIX: Thêm fallback || "" */}
+            <div className="space-y-2">
+              <Label
+                htmlFor="password"
+                className="text-sm font-semibold flex items-center gap-2"
+              >
+                <span className="h-4 w-4 inline-block">🔒</span>
+                Student Password{" "}
+                <span className="text-gray-500 text-xs">(Optional)</span>
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                value={newStudentData.password || ""}
+                onChange={(e) =>
+                  setNewStudentData({
+                    ...newStudentData,
+                    password: e.target.value || "",
+                  })
+                }
+                placeholder="Set a password for student"
                 className="w-full"
               />
             </div>
@@ -655,10 +713,12 @@ export default function ClassroomDetail({ params }) {
               type="button"
               onClick={() => {
                 setIsAddStudentModalOpen(false);
+                // FIX: Reset với tất cả fields = ""
                 setNewStudentData({
                   name: "",
                   date_of_birth: "",
                   student_id: "",
+                  password: "",
                 });
               }}
               variant="outline"
@@ -725,6 +785,7 @@ export default function ClassroomDetail({ params }) {
               </div>
             </div>
 
+            {/* Test Selection */}
             <div className="space-y-2">
               <Label
                 htmlFor="testSelect"
@@ -737,7 +798,7 @@ export default function ClassroomDetail({ params }) {
                 onValueChange={(value) =>
                   setSubmissionData({ ...submissionData, testId: value })
                 }
-                value={submissionData.testId}
+                value={submissionData.testId || ""}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Choose a test from the list" />
@@ -765,6 +826,7 @@ export default function ClassroomDetail({ params }) {
               </Select>
             </div>
 
+            {/* Image Upload */}
             <div className="space-y-2">
               <Label
                 htmlFor="submissionImage"
@@ -802,6 +864,7 @@ export default function ClassroomDetail({ params }) {
               </p>
             </div>
 
+            {/* Upload Progress */}
             {uploadProgress > 0 && uploadProgress < 100 && (
               <div className="space-y-2 bg-blue-50 p-4 rounded-lg border border-blue-200">
                 <div className="flex justify-between text-sm text-blue-900 font-medium">

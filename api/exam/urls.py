@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TestViewSet, SubmissionViewSet, StatisticViewSet
+from .views.omr_views import TestViewSet, SubmissionViewSet, StatisticViewSet
 
 router = DefaultRouter()
 router.register(r'tests', TestViewSet, basename='test')

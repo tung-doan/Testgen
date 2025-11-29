@@ -10,7 +10,7 @@ class User(AbstractUser):
     # ]
 
     username = models.CharField(max_length=150,unique=True, null=True, blank=True)
-    email = models.EmailField(max_length=255, unique=True, db_index= True, blank=True)
+    email = models.EmailField(max_length=255, unique=True, db_index= True, blank=True, null = True)
     date_of_birth = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     GENDER_CHOICES = [
@@ -33,14 +33,3 @@ class User(AbstractUser):
             'refresh': str(refresh),
             'access': str(refresh.access_token)
         }
-
-
-class AuthProvider(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    provider = models.CharField(max_length=50)
-    provider_id = models.CharField(max_length=255)
-
-    class Meta:
-        db_table = 'auth_providers'
-        managed = False
-        unique_together = ('provider', 'provider_id')

@@ -11,11 +11,12 @@ from users.Serializers import *
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
-from .models import User  # Giả sử bạn sử dụng model User tùy chỉnh
-from django.core.mail import send_mail  # Import send_mail for sending emails
-from django.http import Http404  # Import Http404 for raising 404 errors
-from django.contrib import messages  # Import messages for displaying success messages
-from django.shortcuts import redirect  # Import redirect for redirecting users
+from .models import User 
+from classrooms.models import Student
+from django.core.mail import send_mail  
+from django.http import Http404 
+from django.contrib import messages 
+from django.shortcuts import redirect  
 from django.views.generic import DetailView
 from rest_framework.renderers import JSONRenderer
 from django.http import JsonResponse
@@ -92,7 +93,38 @@ class LoginView(APIView):
         # else:
         #     return Response({"detail": "Account not authorized"}, status=status.HTTP_403_FORBIDDEN)
         
+class StudentLoginView(APIView):
+    permission_classes = (AllowAny,)
+    authentication_classes = []
 
+    def post(self, request):
+        student_id = request.data.get("student_id")
+        password = request.data.get("password")
+        if not student_id or not password:
+            return Response({"detail": "student_id and password are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        student = Student.objects.filter(student_id=student_id).first()
+        if not student or not student.user:
+            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user = student.user
+        if not user.check_password(password):
+            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        refresh = RefreshToken.for_user(user)
+        response = Response({
+            "message": "Login successful",
+            "student": {
+                "id": student.id,
+                "name": student.name,
+                "student_id": student.student_id,
+                "classroom_id": student.classroom.id if student.classroom else None,
+            }
+        }, status=status.HTTP_200_OK)
+
+        response.set_cookie(key='access_token', value=str(refresh.access_token), httponly=True, secure=True, samesite='None', path='/')
+        response.set_cookie(key='refresh_token', value=str(refresh), httponly=True, secure=True, samesite='None', path='/')
+        return response
 class CookieTokenRefreshView(TokenRefreshView):
     authentication_classes = []
     permission_classes = [AllowAny]

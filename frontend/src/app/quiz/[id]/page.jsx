@@ -258,7 +258,7 @@ export default function SubmissionSummary() {
   };
 
   const handleSubmissionClick = (submission) => {
-    router.push(`http://127.0.0.1:8000${submission.submission_image}`);
+    router.push(`${submission.submission_image}`);
   };
 
   const getChoiceLetters = () => {
@@ -397,13 +397,13 @@ export default function SubmissionSummary() {
                         <TableCell>
                           {submission.submission_image ? (
                             <a
-                              href={`http://127.0.0.1:8000${submission.submission_image}`}
+                              href={`${submission.submission_image}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <Image
-                                src={`http://127.0.0.1:8000${submission.submission_image}`}
+                                src={`${submission.submission_image}`}
                                 alt="Submission"
                                 width={100}
                                 height={100}

@@ -127,11 +127,10 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.post(
-          `${apiUrl}classroom/${classroomId}/add_student/`,
-          studentData,
-          { withCredentials: true }
-        );
+        const payload = { ...studentData, classroom: classroomId };
+        const response = await axios.post(`${apiUrl}classroom/students/`, payload, {
+          withCredentials: true,
+        });
         return response.data;
       } catch (err) {
         const errorMsg = err.response?.data?.error || "Failed to add student";

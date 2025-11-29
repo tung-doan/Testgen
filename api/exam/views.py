@@ -25,6 +25,9 @@ from PIL import Image, ImageDraw, ImageFont
 import random
 import cv2
 import numpy as np
+import cloudinary
+import cloudinary.uploader
+import tempfile
 
 # Register a font that supports Vietnamese characters
 pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
@@ -501,44 +504,137 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         return Submission.objects.filter(user=self.request.user)
     
     
+    # def destroy(self, request, *args, **kwargs):
+    #     submission = self.get_object()
+    #     # Kiểm tra quyền xóa: chỉ cho phép xóa submission của chính mình hoặc bạn có thể kiểm tra thêm quyền admin, giáo viên...
+    #     if submission.test.created_by != request.user:
+    #         return Response({"error": "You are not authorized to delete this submission."}, status=status.HTTP_403_FORBIDDEN)
+    #     submission.delete()
+    #     return Response({"message": "Submission deleted successfully!"}, status=status.HTTP_204_NO_CONTENT)
+    
     def destroy(self, request, *args, **kwargs):
         submission = self.get_object()
-        # Kiểm tra quyền xóa: chỉ cho phép xóa submission của chính mình hoặc bạn có thể kiểm tra thêm quyền admin, giáo viên...
+        
         if submission.test.created_by != request.user:
-            return Response({"error": "You are not authorized to delete this submission."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"error": "You are not authorized to delete this submission."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if submission.submission_image:
+            try:
+                public_id = submission.submission_image.public_id
+                cloudinary.uploader.destroy(public_id)
+            except Exception as e:
+                print(f"Error deleting image from Cloudinary: {e}")
+        
         submission.delete()
-        return Response({"message": "Submission deleted successfully!"}, status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {"message": "Submission deleted successfully!"}, 
+            status=status.HTTP_204_NO_CONTENT
+        )
+    
+    # @action(detail=False, methods=['post'])
+    # def upload_submission(self, request):
+    #     test_id = request.data.get('test_id')
+    #     student_id = request.data.get('student_id')
+    #     if not test_id:
+    #         return Response({"error": "Test ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     test = get_object_or_404(Test, id=test_id)
+    #     if 'submission_image' not in request.FILES:
+    #         return Response({"error": "Submission image is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     student = None
+    #     if student_id:
+    #         student = get_object_or_404(Student, id=student_id)
+    #         if test.classroom and student.classroom != test.classroom:
+    #             return Response({"error": "Student does not belong to the test's classroom."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     submission = Submission.objects.create(
+    #         test=test,
+    #         user=request.user,
+    #         student=student,    # Liên kết với học sinh hoặc None
+    #         submission_image=request.FILES['submission_image']
+    #     )
+
+    #     threading.Thread(target=process_submission, args=(submission.id,)).start()
+        
+    #     return Response({
+    #         "submission_id": submission.id,
+    #         "message": "Submission uploaded successfully and is being processed"
+    #     }, status=status.HTTP_202_ACCEPTED)
     
     @action(detail=False, methods=['post'])
     def upload_submission(self, request):
         test_id = request.data.get('test_id')
         student_id = request.data.get('student_id')
+        
         if not test_id:
-            return Response({"error": "Test ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Test ID is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         test = get_object_or_404(Test, id=test_id)
+        
         if 'submission_image' not in request.FILES:
-            return Response({"error": "Submission image is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Submission image is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         student = None
         if student_id:
             student = get_object_or_404(Student, id=student_id)
             if test.classroom and student.classroom != test.classroom:
-                return Response({"error": "Student does not belong to the test's classroom."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "Student does not belong to the test's classroom."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
-        submission = Submission.objects.create(
-            test=test,
-            user=request.user,
-            student=student,    # Liên kết với học sinh hoặc None
-            submission_image=request.FILES['submission_image']
-        )
-
-        threading.Thread(target=process_submission, args=(submission.id,)).start()
+        # Upload image to Cloudinary
+        uploaded_file = request.FILES['submission_image']
         
-        return Response({
-            "submission_id": submission.id,
-            "message": "Submission uploaded successfully and is being processed"
-        }, status=status.HTTP_202_ACCEPTED)
+        try:
+            # Upload với tên file tùy chỉnh
+            upload_result = cloudinary.uploader.upload(
+                uploaded_file,
+                folder=f"testgen/submissions/test_{test_id}",
+                public_id=f"submission_{student.student_id if student else request.user.username}_{test_id}",
+                resource_type="image",
+                overwrite=True,
+                transformation=[
+                    {'quality': 'auto'},
+                    {'fetch_format': 'auto'}
+                ]
+            )
+            
+            # Tạo submission với Cloudinary URL
+            submission = Submission.objects.create(
+                test=test,
+                user=request.user,
+                student=student,
+                submission_image=upload_result['secure_url']  # Lưu URL từ Cloudinary
+            )
+            
+            # Process submission trong background thread
+            threading.Thread(
+                target=process_submission_cloudinary, 
+                args=(submission.id, upload_result['secure_url'])
+            ).start()
+            
+            return Response({
+                "submission_id": submission.id,
+                "image_url": upload_result['secure_url'],
+                "message": "Submission uploaded successfully and is being processed"
+            }, status=status.HTTP_202_ACCEPTED)
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to upload image: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def submission_summary(self, request):
@@ -677,6 +773,107 @@ def process_submission(submission_id):
     with transaction.atomic():
         submission.total_score = total_score
         submission.save()
+        
+def process_submission_cloudinary(submission_id, image_url):
+    """
+    Process submission với image từ Cloudinary
+    """
+    import requests
+    
+    submission = Submission.objects.get(id=submission_id)
+    test = submission.test
+    
+    # Download image từ Cloudinary về temporary file
+    try:
+        response = requests.get(image_url)
+        response.raise_for_status()
+        
+        # Tạo temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            tmp_file.write(response.content)
+            tmp_image_path = tmp_file.name
+        
+        # Process OMR sheet
+        answers_with_positions, paper, question_contours = process_omr_sheet(tmp_image_path, test)
+        
+        correct_answers = 0
+        total_questions = test.questions.count()
+        
+        # Define answer key
+        question_ids = list(test.questions.values_list('id', flat=True))
+        ANSWER_KEY = {
+            i: {'A': 0, 'B': 1, 'C': 2, 'D': 3}[test.questions.all()[i].correct_answer] 
+            for i in range(total_questions)
+        }
+        
+        # Process answers
+        for question_id, (user_answer, user_position, contours) in answers_with_positions.items():
+            if not user_answer or user_answer.strip() == "":
+                is_correct = False
+            else:
+                choice_letters = ['A', 'B', 'C', 'D'][:test.num_choices]
+                try:
+                    user_answer_idx = choice_letters.index(user_answer[0])
+                    question_index = question_ids.index(question_id)
+                    correct_answer_idx = ANSWER_KEY[question_index]
+                    is_correct = user_answer_idx == correct_answer_idx
+                except (ValueError, KeyError, IndexError):
+                    is_correct = False
+            
+            if is_correct:
+                correct_answers += 1
+            
+            AnswerDetected.objects.create(
+                submission=submission,
+                question=test.questions.get(id=question_id),
+                is_correct=is_correct,
+                score=1 if is_correct else 0,
+                confidence=0.9
+            )
+            
+            # Draw on image
+            if user_answer and user_answer.strip() != "":
+                color = (0, 0, 255)
+                k = ANSWER_KEY[question_index]
+                if k == user_answer_idx:
+                    color = (0, 255, 0)
+                cv2.drawContours(paper, [contours[k]], -1, color, 3)
+        
+        # Calculate score
+        total_score = (correct_answers / total_questions) * 10 if total_questions > 0 else 0
+        total_score = round(total_score, 2)
+        
+        # Add score text
+        score_text = f"TOTAL SCORE: {total_score}/10"
+        cv2.putText(paper, score_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        # Save processed image
+        cv2.imwrite(tmp_image_path, paper)
+        
+        # Upload processed image back to Cloudinary
+        processed_upload = cloudinary.uploader.upload(
+            tmp_image_path,
+            folder=f"testgen/submissions/test_{test.id}",
+            public_id=f"processed_submission_{submission.id}",
+            resource_type="image",
+            overwrite=True
+        )
+        
+        # Update submission with processed image URL and score
+        with transaction.atomic():
+            submission.submission_image = processed_upload['secure_url']
+            submission.total_score = total_score
+            submission.save()
+        
+        # Clean up temporary file
+        os.unlink(tmp_image_path)
+        
+    except Exception as e:
+        print(f"Error processing submission: {e}")
+        # Có thể log error hoặc update submission status
+        with transaction.atomic():
+            submission.total_score = 0
+            submission.save()
 
 def process_omr_sheet(image_path, test):
     import cv2
