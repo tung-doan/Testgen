@@ -139,10 +139,11 @@ export default function ClassroomDetail({ params }) {
         return;
       }
 
-      // FIX: Tạo payload chỉ với các giá trị có nội dung
+      // Tạo payload chỉ với các giá trị có nội dung
       const payload = {
         name: newStudentData.name,
         student_id: newStudentData.student_id,
+        password: newStudentData.password,
       };
 
       // Chỉ thêm date_of_birth nếu có giá trị
@@ -153,7 +154,7 @@ export default function ClassroomDetail({ params }) {
         payload.date_of_birth = newStudentData.date_of_birth;
       }
 
-      // Chỉ thêm password nếu có giá trị
+      // password
       if (newStudentData.password && newStudentData.password.trim() !== "") {
         payload.password = newStudentData.password;
       }
@@ -593,149 +594,154 @@ export default function ClassroomDetail({ params }) {
       </div>
 
       {/* Add Student Modal */}
-      <Dialog
-        open={isAddStudentModalOpen}
-        onOpenChange={setIsAddStudentModalOpen}
-      >
-        <DialogContent className="sm:max-w-[550px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="bg-emerald-100 p-2 rounded-lg">
-                <UserPlus className="h-6 w-6 text-emerald-600" />
-              </div>
-              <div>
-                <DialogTitle className="text-2xl font-semibold">
-                  Add New Student
-                </DialogTitle>
-                <DialogDescription className="text-gray-600 mt-1">
-                  Fill in the student details below
-                </DialogDescription>
-              </div>
+      <Dialog open={isAddStudentModalOpen} onOpenChange={setIsAddStudentModalOpen}>
+      <DialogContent className="sm:max-w-[500px] flex flex-col gap-4">
+        <DialogHeader>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="bg-emerald-100 p-3 rounded-full">
+              <UserPlus className="h-6 w-6 text-emerald-600" />
             </div>
-          </DialogHeader>
-
-          <div className="space-y-5 py-4">
-            {/* Full Name */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="name"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <Users className="h-4 w-4" />
-                Full Name <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="name"
-                value={newStudentData.name}
-                onChange={(e) =>
-                  setNewStudentData({ ...newStudentData, name: e.target.value })
-                }
-                placeholder="Enter student's full name"
-                className="w-full"
-              />
+            <div>
+              <DialogTitle className="text-2xl font-semibold">
+                Add New Student
+              </DialogTitle>
+              <DialogDescription className="text-gray-600 mt-1">
+                Fill in all required fields below
+              </DialogDescription>
             </div>
+          </div>
+        </DialogHeader>
 
-            {/* Student ID */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="student_id"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <IdCard className="h-4 w-4" />
-                Student ID <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="student_id"
-                value={newStudentData.student_id}
-                onChange={(e) =>
-                  setNewStudentData({
-                    ...newStudentData,
-                    student_id: e.target.value,
-                  })
-                }
-                placeholder="Enter student ID (e.g., ST001)"
-                className="w-full"
-              />
-            </div>
+        <div className="space-y-5 py-4 flex flex-col gap-4">
+          {/* Full Name */}
+          <div className="space-y-2">
+            <Label
+              htmlFor="name"
+              className="text-sm font-semibold flex items-center gap-2"
+            >
+              <Users className="h-4 w-4" />
+              Full Name <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="name"
+              value={newStudentData.name}
+              onChange={(e) =>
+                setNewStudentData({ ...newStudentData, name: e.target.value })
+              }
+              placeholder="Enter student's full name"
+              className="w-full"
+              required
+            />
+          </div>
 
-            {/* Date of Birth - FIX: Thêm fallback || "" */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="date_of_birth"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <Calendar className="h-4 w-4" />
-                Date of Birth{" "}
-                <span className="text-gray-500 text-xs">(Optional)</span>
-              </Label>
-              <Input
-                id="date_of_birth"
-                type="date"
-                value={newStudentData.date_of_birth || ""}
-                onChange={(e) =>
-                  setNewStudentData({
-                    ...newStudentData,
-                    date_of_birth: e.target.value || "",
-                  })
-                }
-                className="w-full"
-              />
-            </div>
+          {/* Student ID */}
+          <div className="space-y-2">
+            <Label
+              htmlFor="student_id"
+              className="text-sm font-semibold flex items-center gap-2"
+            >
+              <IdCard className="h-4 w-4" />
+              Student ID <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="student_id"
+              value={newStudentData.student_id}
+              onChange={(e) =>
+                setNewStudentData({
+                  ...newStudentData,
+                  student_id: e.target.value,
+                })
+              }
+              placeholder="Enter student ID (e.g., ST001)"
+              className="w-full"
+              required
+            />
+          </div>
 
-            {/* Password - FIX: Thêm fallback || "" */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="password"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <span className="h-4 w-4 inline-block">🔒</span>
-                Student Password{" "}
-                <span className="text-gray-500 text-xs">(Optional)</span>
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                value={newStudentData.password || ""}
-                onChange={(e) =>
-                  setNewStudentData({
-                    ...newStudentData,
-                    password: e.target.value || "",
-                  })
-                }
-                placeholder="Set a password for student"
-                className="w-full"
-              />
+          {/* Password - REQUIRED */}
+          <div className="space-y-2">
+            <Label
+              htmlFor="password"
+              className="text-sm font-semibold flex items-center gap-2"
+            >
+              <span className="h-4 w-4 inline-block">🔒</span>
+              Password <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="password"
+              type="password"
+              value={newStudentData.password || ""}
+              onChange={(e) =>
+                setNewStudentData({
+                  ...newStudentData,
+                  password: e.target.value || "",
+                })
+              }
+              placeholder="Enter password (min 6 characters)"
+              className="w-full"
+              minLength={6}
+              required
+            />
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mt-2">
+              <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-amber-800">
+                <strong>Important:</strong> This password will be used by the student to login. Make sure it's at least 6 characters long.
+              </p>
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              onClick={() => {
-                setIsAddStudentModalOpen(false);
-                // FIX: Reset với tất cả fields = ""
+          {/* Date of Birth - Optional */}
+          <div className="space-y-2">
+            <Label
+              htmlFor="date_of_birth"
+              className="text-sm font-semibold flex items-center gap-2"
+            >
+              <Calendar className="h-4 w-4" />
+              Date of Birth{" "}
+              <span className="text-gray-500 text-xs">(Optional)</span>
+            </Label>
+            <Input
+              id="date_of_birth"
+              type="date"
+              value={newStudentData.date_of_birth || ""}
+              onChange={(e) =>
                 setNewStudentData({
-                  name: "",
-                  date_of_birth: "",
-                  student_id: "",
-                  password: "",
-                });
-              }}
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmitNewStudent}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add Student
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                  ...newStudentData,
+                  date_of_birth: e.target.value || "",
+                })
+              }
+              className="w-full"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button
+            type="button"
+            onClick={() => {
+              setIsAddStudentModalOpen(false);
+              setNewStudentData({
+                name: "",
+                date_of_birth: "",
+                student_id: "",
+                password: "",
+              });
+            }}
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSubmitNewStudent}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Add Student
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
       {/* Add Submission Modal */}
       <Dialog

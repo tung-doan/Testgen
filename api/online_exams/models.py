@@ -2,9 +2,11 @@ from django.db import models
 from users.models import User
 from classrooms.models import Classroom, Student
 from question_bank.models import Question # IMPORT TỪ APP MỚI
+from django.utils import timezone
 
 class Exam(models.Model):
     title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_exams')
     classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
 
@@ -20,7 +22,8 @@ class Exam(models.Model):
         related_name='exams'
     )
     generation_config = models.JSONField(null=True, blank=True, help_text="Cấu hình sinh đề tự động")
-
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 class ExamQuestion(models.Model):
     """Bảng trung gian để lưu điểm và thứ tự câu hỏi cho MỘT đề thi"""
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE)

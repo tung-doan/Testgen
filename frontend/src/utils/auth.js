@@ -1,10 +1,10 @@
 import axios from "axios";
-
-const API_URL = "http://127.0.0.1:8000/";
+import AuthService from "@/services/auth.service";
+const API_URL = "http://127.0.0.1:8000/api/";
 
 export const registerUser = async (email, username, password) => {
     try {
-        const response = await axios.post(`${API_URL}/users/register/`, {email, username, password},
+        const response = await axios.post(`${API_URL}users/register/`, {email, username, password},
             {withCredentials: true}
         )
         return response.data;
@@ -18,7 +18,7 @@ export const registerUser = async (email, username, password) => {
 
 export const loginUser = async (username, password) => {
     try {
-        const response = await axios.post(`${API_URL}/users/login/`, {username, password},
+        const response = await axios.post(`${API_URL}users/login/`, {username, password},
             {withCredentials: true}
         )
         return response.data;
@@ -28,7 +28,14 @@ export const loginUser = async (username, password) => {
     }
 }
     
-
+export const loginStudent = async (studentId, password) => {
+  try {
+    const response = await AuthService.studentLogin(studentId, password);
+    return response;
+  } catch (e) {
+    throw new Error(e.message || "Student login failed!");
+  }
+};
 
 // Hàm đăng xuất
 export const logoutUser = async () => {
@@ -70,7 +77,7 @@ export const getUserInfo = async () => {
 
 export const refreshToken = async () => {
     try {
-        const response = await axios.post(`${API_URL}/users/refresh/`, null,
+        const response = await axios.post(`${API_URL}users/refresh/`, null,
             {withCredentials: true}
         )
         return response.data;

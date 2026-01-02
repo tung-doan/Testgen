@@ -66,10 +66,22 @@ class StudentViewSet(viewsets.ModelViewSet):
         # Kiểm tra dữ liệu đầu vào
         name = self.request.data.get('name')
         student_id = self.request.data.get('student_id')
+        password = self.request.data.get('password')
+        
         if not name or not student_id:
             raise serializers.ValidationError({
                 "name": "Name is required." if not name else None,
                 "student_id": "Student ID is required." if not student_id else None
+            })
+            
+        if not password:
+            raise serializers.ValidationError({
+                "password": "Password is required when creating a student."
+            })
+        
+        if len(password) < 6:
+            raise serializers.ValidationError({
+                "password": "Password must be at least 6 characters long."
             })
         
         serializer.save(classroom=classroom)

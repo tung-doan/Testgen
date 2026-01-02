@@ -23,6 +23,8 @@ export default function Header() {
   const handlerlogout = async () => {
     try {
       await logoutUser();
+      localStorage.removeItem('user');
+      localStorage.removeItem('student');
       setUser(null);
       Router.push("/login");
     } catch (error) {

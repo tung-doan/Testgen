@@ -166,3 +166,15 @@ Bạn có thể tải file mẫu tại:
 
 - English: [sample_questions_en.docx](sample_questions_en.docx)
 - Vietnamese: [sample_questions_vi.docx](sample_questions_vi.docx)
+
+# Word Document Format Guide / Hướng dẫn định dạng file Word
+
+⚠️ **IMPORTANT: Automatic Point Distribution / Tự động phân phối điểm**
+
+- Total points for all questions = **10.00**
+- Points per question = 10 / number of questions
+- Multiple correct answers: **All-or-Nothing** (must select all correct options to get points)
+
+Tổng điểm cho tất cả câu = **10.00**  
+Điểm mỗi câu = 10 / số câu hỏi  
+Nhiều đáp án đúng: **Đúng hết mới có điểm** (phải chọn đúng tất cả đáp án)

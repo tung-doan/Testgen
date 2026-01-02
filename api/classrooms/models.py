@@ -47,8 +47,8 @@ class Student(models.Model):
 
     @property
     def average_score(self):
-        from exam.models import Submission  # tránh import vòng
-        submissions = Submission.objects.filter(student=self)
+        from exam.models import PaperSubmission  # tránh import vòng
+        submissions = PaperSubmission.objects.filter(student=self)
         scores = [s.total_score for s in submissions if s.total_score is not None]
         if scores:
             return round(sum(scores) / len(scores), 2)

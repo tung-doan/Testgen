@@ -137,8 +137,18 @@ class WordQuestionParser:
         current_answer = None
         current_order = None
         
+        all_lines = []
         for para in doc.paragraphs:
             text = para.text.strip()
+            if not text:
+                continue
+            # Split by newline in case paragraph contains multiple lines
+            lines = text.split('\n')
+            all_lines.extend([line.strip() for line in lines if line.strip()])
+        
+        print(f"[Parser] Total lines to process: {len(all_lines)}")
+        
+        for text in all_lines:
             if not text:
                 continue
             
@@ -244,8 +254,15 @@ class WordQuestionParser:
         
         if question_type == Question.QuestionType.FILL_IN_BLANK:
             # For fill blank, store answer in correct_answer_text
-            result["question"]["correct_answer_text"] = answer if answer else ""
-            print(f"[Parser] Fill in blank question, answer: {answer}")
+            if answer:
+                # Tách các đáp án bằng dấu phẩy, loại bỏ khoảng trắng và các phần tử rỗng
+                answer_list = [a.strip() for a in answer.split(',') if a.strip()]
+                # Lưu lại dưới dạng chuỗi ngăn cách bởi dấu phẩy chuẩn: "Hanoi, Hà Nội"
+                result["question"]["correct_answer_text"] = ", ".join(answer_list)
+            else:
+                result["question"]["correct_answer_text"] = ""
+            
+            print(f"[Parser] Fill in blank question, answers parsed: {result['question']['correct_answer_text']}")
             # No options needed for fill in blank
         
         elif question_type == Question.QuestionType.TRUE_FALSE_EXTENDED:
@@ -256,8 +273,8 @@ class WordQuestionParser:
                 is_correct = answer_map.get(opt_number, False)
                 result["options"].append({
                     "text": opt["text"],
-                    "is_correct_bool": is_correct,  # ✅ Use is_correct_bool for TFE
-                    "score_percentage": 0.0,
+                    "is_correct_bool": is_correct,  # Use is_correct_bool for TFE
+                    "correct_order": None,
                     "order": opt["order"]
                 })
         
@@ -269,7 +286,7 @@ class WordQuestionParser:
                 correct_position = correct_order.index(letter) if letter in correct_order else -1
                 result["options"].append({
                     "text": opt["text"],
-                    "score_percentage": 0.0,
+                    "is_correct_bool": False,
                     "correct_order": correct_position + 1 if correct_position >= 0 else None,
                     "order": opt["order"]
                 })
@@ -286,7 +303,8 @@ class WordQuestionParser:
                 is_correct = letter in correct_letters
                 result["options"].append({
                     "text": opt["text"],
-                    "score_percentage": score_per_correct if is_correct else 0.0,
+                    "is_correct_bool": is_correct,
+                    "correct_order": None,
                     "order": opt["order"]
                 })
         
@@ -377,6 +395,7 @@ def process_word_document(file_path, section, user):
         
         # Create questions and options
         created_count = 0
+        num_questions = len(questions_data)
         
         for idx, data in enumerate(questions_data, 1):
             try:
@@ -392,7 +411,6 @@ def process_word_document(file_path, section, user):
                     created_by=user,
                     prompt=question_data["prompt"],
                     question_type=question_data["question_type"],
-                    points=question_data["points"],
                     correct_answer_text=question_data.get("correct_answer_text")
                 )
                 
@@ -403,8 +421,7 @@ def process_word_document(file_path, section, user):
                     option = AnswerOption.objects.create(
                         question=question,
                         text=opt_data["text"],
-                        score_percentage=opt_data.get("score_percentage", 0.0),
-                        is_correct_bool=opt_data.get("is_correct_bool"),
+                        is_correct_bool=opt_data.get("is_correct_bool", False),
                         correct_order=opt_data.get("correct_order"),
                         order=opt_data["order"]
                     )

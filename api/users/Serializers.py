@@ -180,3 +180,27 @@ class PasswordResetSerializer(serializers.Serializer):
         user.save()
         return {'user':user, 'otp': otp}
         
+class UserSerializer(serializers.ModelSerializer):
+    is_student = serializers.SerializerMethodField()
+    student_info = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'is_student', 'student_info']
+    
+    def get_is_student(self, obj):
+        """Check if user is a student"""
+        return hasattr(obj, 'student_profile') and obj.student_profile is not None
+    
+    def get_student_info(self, obj):
+        """Get student information if user is a student"""
+        if hasattr(obj, 'student_profile') and obj.student_profile:
+            student = obj.student_profile
+            return {
+                "id": student.id,
+                "name": student.name,
+                "student_id": student.student_id,
+                "classroom_id": student.classroom.id if student.classroom else None,
+                "classroom_name": student.classroom.name if student.classroom else None,
+            }
+        return None

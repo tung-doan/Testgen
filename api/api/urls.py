@@ -23,10 +23,10 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("users/", include("users.urls"), name="user_profile"),
+    path("api/users/", include("users.urls"), name="user_profile"),
     path("api/", include("exam.urls"), name="tests"),
-    path("classroom/", include("classrooms.urls"), name="classrooms"),
-    path("online-exams/", include("online_exams.urls"), name="online_exams"),
+    path("api/classroom/", include("classrooms.urls"), name="classrooms"),
+    path("api/online-exams/", include("online_exams.urls"), name="online_exams"),
     path("api/question-bank/", include("question_bank.urls"), name="question_bank"),
     # path("login/", include("users.urls"), name="login"),
     # path("register/", include("users.urls"), name="register"),

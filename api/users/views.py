@@ -56,13 +56,21 @@ class LoginView(APIView):
     def post(self, request):
         serializers = self.serializer_class(data=request.data, context = {'request': request})
         if serializers.is_valid():
+            username = request.data.get("username")
             user = serializers.validated_data
             refresh = RefreshToken.for_user(user)
             access_token = str(refresh.access_token)
+            user_data = {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_student": False,
+            }
+            
             response = Response({
-                "user": customUserSerializer(user).data},
-                status = status.HTTP_200_OK
-            )
+                "message": "Login successful",
+                "user": user_data
+            }, status=status.HTTP_200_OK)
             response.set_cookie(key = 'access_token',
                                 value = access_token,
                                 httponly = True,
@@ -112,15 +120,28 @@ class StudentLoginView(APIView):
             return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
         refresh = RefreshToken.for_user(user)
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_student": True,
+        }
+        
+        student_data = {
+            "id": student.id,
+            "name": student.name,
+            "student_id": student.student_id,
+            "classroom_id": student.classroom.id if student.classroom else None,
+            "classroom_name": student.classroom.name if student.classroom else None,
+        }
+        
         response = Response({
             "message": "Login successful",
-            "student": {
-                "id": student.id,
-                "name": student.name,
-                "student_id": student.student_id,
-                "classroom_id": student.classroom.id if student.classroom else None,
-            }
-        }, status=status.HTTP_200_OK)
+            "user": user_data,
+            "student": student_data,  # ✅ Trả về student data riêng
+            "access": str(refresh.access_token),
+            "refresh": str(refresh)
+        }, status = status.HTTP_200_OK)
 
         response.set_cookie(key='access_token', value=str(refresh.access_token), httponly=True, secure=True, samesite='None', path='/')
         response.set_cookie(key='refresh_token', value=str(refresh), httponly=True, secure=True, samesite='None', path='/')

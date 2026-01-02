@@ -49,8 +49,10 @@ export default function QuestionBank() {
     deleteSubject,
     fetchChapters,
     createChapter,
+    deleteChapter,
     fetchSections,
     createSection,
+    deleteSection,
     uploadQuestions,
   } = useQuestionBank();
 
@@ -94,6 +96,60 @@ export default function QuestionBank() {
       setSections([]);
     }
   }, [selectedChapter]);
+
+  const handleDeleteChapter = async (chapterId, event) => {
+    event.stopPropagation();
+    if (
+      !confirm(
+        "Are you sure you want to delete this chapter? All sections and questions in this chapter will be permanently deleted."
+      )
+    )
+      return;
+
+    try {
+      await deleteChapter(chapterId);
+
+      // Reset state if deleted chapter was selected
+      if (selectedChapter?.id === chapterId) {
+        setSelectedChapter(null);
+        setSections([]);
+      }
+
+      // Reload chapters
+      if (selectedSubject) {
+        await loadChapters(selectedSubject.id);
+      }
+
+      alert("Chapter deleted successfully!");
+    } catch (err) {
+      console.error("Error deleting chapter:", err);
+      alert("Failed to delete chapter: " + err.message);
+    }
+  };
+
+  const handleDeleteSection = async (sectionId, event) => {
+    event.stopPropagation();
+    if (
+      !confirm(
+        "Are you sure you want to delete this section? All questions in this section will be permanently deleted."
+      )
+    )
+      return;
+
+    try {
+      await deleteSection(sectionId);
+
+      // Reload sections
+      if (selectedChapter) {
+        await loadSections(selectedChapter.id);
+      }
+
+      alert("Section deleted successfully!");
+    } catch (err) {
+      console.error("Error deleting section:", err);
+      alert("Failed to delete section: " + err.message);
+    }
+  };
 
   const loadSubjects = async () => {
     try {
@@ -258,9 +314,9 @@ export default function QuestionBank() {
       <Navbar />
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 py-8 px-4">
         <div className="max-w-7xl mx-auto">
-          <Card className="border-0 shadow-xl mb-6">
-            <CardHeader className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
-              <div className="flex items-center justify-between">
+          <Card className="border-0 shadow-xl mb-6 !p-0 bg-white/80 backdrop-blur">
+            <CardHeader className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg ">
+              <div className="flex items-center justify-between p-6">
                 <div className="flex items-center gap-3">
                   <div className="bg-white/20 p-3 rounded-lg">
                     <Database className="h-8 w-8" />
@@ -277,7 +333,7 @@ export default function QuestionBank() {
                     setFormError(null);
                     setIsSubjectModalOpen(true);
                   }}
-                  className="bg-white text-indigo-700 hover:bg-indigo-50"
+                  className="bg-white text-indigo-700 hover:bg-indigo-50 cursor-pointer"
                 >
                   <Plus className="h-5 w-5 mr-2" />
                   New Subject
@@ -287,7 +343,7 @@ export default function QuestionBank() {
           </Card>
 
           {(selectedSubject || selectedChapter) && (
-            <Card className="border-0 shadow-md mb-2 bg-white/80 backdrop-blur">
+            <Card className="border-0 shadow-md mb-6 bg-white/80 backdrop-blur">
               <CardContent className="p-6">
                 <div className="flex items-center justify-center gap-3 text-xl font-bold text-gray-800">
                   <BookOpen className="h-6 w-6" />
@@ -316,9 +372,9 @@ export default function QuestionBank() {
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Subjects Sidebar */}
-              <Card className="border-0 shadow-lg lg:col-span-1">
-                <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-purple-50">
-                  <div className="flex items-center gap-2">
+              <Card className="border-0 shadow-lg lg:col-span-1 !p-0">
+                <CardHeader className="border-b bg-gradient-to-r from-indigo-300 to-purple-500 rounded-t-xl">
+                  <div className="flex items-center gap-2 p-2">
                     <BookOpen className="h-5 w-5 text-indigo-600" />
                     <CardTitle className="text-lg">
                       Subjects ({subjects.length})
@@ -368,7 +424,7 @@ export default function QuestionBank() {
                               onClick={(e) =>
                                 handleDeleteSubject(subject.id, e)
                               }
-                              className="ml-2 hover:bg-red-100"
+                              className="ml-2 hover:bg-red-100 cursor-pointer"
                             >
                               <Trash2 className="h-4 w-4 text-red-600" />
                             </Button>
@@ -381,7 +437,7 @@ export default function QuestionBank() {
               </Card>
 
               {/* Chapters & Sections */}
-              <Card className="border-0 shadow-lg lg:col-span-2 overflow-hidden">
+              <Card className="border-0 shadow-lg lg:col-span-2 overflow-hidden !p-0">
                 {!selectedSubject ? (
                   <div className="p-12 text-center text-gray-500">
                     <Database className="h-16 w-16 mx-auto mb-4 opacity-30" />
@@ -405,6 +461,7 @@ export default function QuestionBank() {
             transition-all duration-200
             border-b-4 border-transparent
             data-[state=active]:border-indigo-600
+            cursor-pointer
           "
                       >
                         <FolderOpen className="h-4 w-4 mr-2" />
@@ -427,6 +484,7 @@ export default function QuestionBank() {
             transition-all duration-200
             border-b-4 border-transparent
             data-[state=active]:border-purple-600
+            cursor-pointer
           "
                       >
                         <FileText className="h-4 w-4 mr-2" />
@@ -448,7 +506,7 @@ export default function QuestionBank() {
                             setIsChapterModalOpen(true);
                           }}
                           size="sm"
-                          className="bg-indigo-600 hover:bg-indigo-700"
+                          className="bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
                         >
                           <Plus className="h-4 w-4 mr-2" />
                           Add Chapter
@@ -477,6 +535,9 @@ export default function QuestionBank() {
                                 <TableHead className="text-center text-base font-bold">
                                   Sections
                                 </TableHead>
+                                <TableHead className="text-center text-base font-bold">
+                                  Actions
+                                </TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -503,6 +564,19 @@ export default function QuestionBank() {
                                       {chapter.section_count || 0} sections
                                     </span>
                                   </TableCell>
+                                  <TableCell className="text-center">
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={(e) =>
+                                        handleDeleteChapter(chapter.id, e)
+                                      }
+                                      className="hover:bg-red-600 cursor-pointer"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-1" />
+                                      Delete
+                                    </Button>
+                                  </TableCell>
                                 </TableRow>
                               ))}
                             </TableBody>
@@ -525,7 +599,7 @@ export default function QuestionBank() {
                           }}
                           disabled={!selectedChapter}
                           size="sm"
-                          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300"
+                          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 cursor-pointer"
                         >
                           <Plus className="h-4 w-4 mr-2" />
                           Add Section
@@ -593,15 +667,16 @@ export default function QuestionBank() {
                                         onClick={() =>
                                           handleViewQuestions(section.id)
                                         }
-                                        className="hover:bg-blue-50"
+                                        className="hover:bg-blue-50 cursor-pointer"
                                       >
                                         <Eye className="h-4 w-4 mr-1" />
                                         View
                                       </Button>
                                       <Button
                                         size="sm"
-                                        className="bg-green-600 hover:bg-green-700"
-                                        onClick={() => {
+                                        className="bg-green-600 hover:bg-green-700 cursor-pointer"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
                                           setFormError(null);
                                           setSelectedSectionForUpload(section);
                                           setIsUploadModalOpen(true);
@@ -609,6 +684,17 @@ export default function QuestionBank() {
                                       >
                                         <Upload className="h-4 w-4 mr-1" />
                                         Upload
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={(e) =>
+                                          handleDeleteSection(section.id, e)
+                                        }
+                                        className="hover:bg-red-600 cursor-pointer"
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-1" />
+                                        Delete
                                       </Button>
                                     </div>
                                   </TableCell>
@@ -627,7 +713,7 @@ export default function QuestionBank() {
         </div>
       </div>
 
-      {/* Subject Modal - ✅ Loại bỏ code field */}
+      {/* Subject Modal */}
       <Dialog open={isSubjectModalOpen} onOpenChange={setIsSubjectModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -639,8 +725,8 @@ export default function QuestionBank() {
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
-          <div className="space-y-4">
-            <div>
+          <div className="space-y-4 cursor-pointer">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="subjectName">Subject Name *</Label>
               <Input
                 id="subjectName"
@@ -653,6 +739,7 @@ export default function QuestionBank() {
           <DialogFooter>
             <Button
               variant="outline"
+              className="cursor-pointer hover:bg-gray-400"
               onClick={() => {
                 setIsSubjectModalOpen(false);
                 setFormError(null);
@@ -660,14 +747,14 @@ export default function QuestionBank() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreateSubject} className="bg-indigo-600">
+            <Button onClick={handleCreateSubject} className="bg-indigo-600 cursor-pointer">
               Create Subject
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Chapter Modal - ✅ Loại bỏ description */}
+      {/* Chapter Modal*/}
       <Dialog open={isChapterModalOpen} onOpenChange={setIsChapterModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -687,8 +774,8 @@ export default function QuestionBank() {
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-2 space-y-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="chapterName">Chapter Name *</Label>
               <Input
                 id="chapterName"
@@ -699,7 +786,7 @@ export default function QuestionBank() {
                 placeholder="e.g., Algebra"
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="chapterOrder">Order</Label>
               <Input
                 id="chapterOrder"
@@ -718,6 +805,7 @@ export default function QuestionBank() {
           <DialogFooter>
             <Button
               variant="outline"
+              className="cursor-pointer hover:bg-gray-400"
               onClick={() => {
                 setIsChapterModalOpen(false);
                 setFormError(null);
@@ -725,7 +813,7 @@ export default function QuestionBank() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreateChapter} className="bg-indigo-600">
+            <Button onClick={handleCreateChapter} className="bg-indigo-600 cursor-pointer">
               Create Chapter
             </Button>
           </DialogFooter>
@@ -752,8 +840,8 @@ export default function QuestionBank() {
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-2 space-y-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="sectionName">Section Name *</Label>
               <Input
                 id="sectionName"
@@ -764,7 +852,7 @@ export default function QuestionBank() {
                 placeholder="e.g., Linear Equations"
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="sectionOrder">Order</Label>
               <Input
                 id="sectionOrder"
@@ -783,6 +871,7 @@ export default function QuestionBank() {
           <DialogFooter>
             <Button
               variant="outline"
+              className="cursor-pointer hover:bg-gray-400"
               onClick={() => {
                 setIsSectionModalOpen(false);
                 setFormError(null);
@@ -790,7 +879,7 @@ export default function QuestionBank() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreateSection} className="bg-purple-600">
+            <Button onClick={handleCreateSection} className="bg-purple-600 cursor-pointer">
               Create Section
             </Button>
           </DialogFooter>
@@ -839,6 +928,7 @@ export default function QuestionBank() {
           <DialogFooter>
             <Button
               variant="outline"
+              className="cursor-pointer hover:bg-gray-400"
               onClick={() => {
                 setIsUploadModalOpen(false);
                 setFormError(null);

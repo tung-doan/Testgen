@@ -103,13 +103,13 @@ export default function SectionQuestions({ params }) {
       <Navbar />
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 py-8 px-4">
         <div className="max-w-7xl mx-auto">
-          <Card className="border-0 shadow-xl">
-            <CardHeader className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
-              <div className="flex items-center gap-4">
+          <Card className="border-0 shadow-xl overflow-hidden !p-0">
+            <CardHeader className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-0 m-0">
+              <div className="flex items-center gap-4 p-2">
                 <Button
                   variant="ghost"
                   onClick={() => router.back()}
-                  className="text-white hover:bg-white/20"
+                  className="text-white hover:bg-white/20 hover:cursor-pointer"
                 >
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
@@ -167,6 +167,7 @@ export default function SectionQuestions({ params }) {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="hover:bg-gray-200 cursor-pointer"
                                 onClick={() => handleViewDetails(question)}
                               >
                                 <Eye className="h-4 w-4" />
@@ -174,6 +175,7 @@ export default function SectionQuestions({ params }) {
                               <Button
                                 size="sm"
                                 variant="destructive"
+                                className="bg-red-400 hover:bg-red-600 cursor-pointer"
                                 onClick={() => handleDelete(question.id)}
                               >
                                 <Trash2 className="h-4 w-4" />

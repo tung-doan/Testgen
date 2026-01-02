@@ -13,14 +13,30 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import Link from "next/link";
-import React from "react";
+import React,  { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { ChevronDown, FileText, Monitor } from "lucide-react";
 
+
 export default function Navbar() {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const [isStudent, setIsStudent] = useState(null);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("user");
+    if (raw) {
+      try {
+        const user = JSON.parse(raw);
+        setIsStudent(user?.is_student ?? false);
+      } catch (e) {
+        console.error("Invalid user data in localStorage");
+        setIsStudent(false);
+      }
+    } else {
+      setIsStudent(false);
+    }
+  }, []);
 
   const studentNavItems = [
     { label: "Dashboard", href: "/student/dashboard" },
@@ -44,7 +60,7 @@ export default function Navbar() {
         },
         {
           label: "Paper Test",
-          href: "/create-test/paper",
+          href: "/quiz",
           icon: FileText,
           description: "Generate printable exam sheets",
         },
@@ -58,7 +74,7 @@ export default function Navbar() {
     { label: "Statistics", href: "/statistics" },
   ];
 
-  const navItems = user && user.is_student ? studentNavItems : teacherNavItems;
+  const navItems =  isStudent ? studentNavItems : teacherNavItems;
 
   return (
     <header className="w-full flex items-start bg-[#302f2fd1] px-14 py-6 top-0 z-50 shadow-md">

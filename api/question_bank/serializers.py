@@ -55,7 +55,7 @@ class AnswerOptionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = AnswerOption
-        fields = ['id', 'text', 'score_percentage', 'is_correct_bool', 'correct_order', 'order', 'is_correct']
+        fields = ['id', 'text', 'is_correct_bool', 'correct_order', 'order', 'is_correct']
 
 class QuestionSerializer(serializers.ModelSerializer):
     section_name = serializers.CharField(source='section.name', read_only=True)
@@ -67,7 +67,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = [
-            'id', 'prompt', 'question_type', 'question_type_display', 'points',
+            'id', 'prompt', 'question_type', 'question_type_display',
             'section', 'section_name', 'chapter_name', 'subject_name',
             'option_count', 'created_at', 'is_active'
         ]
@@ -83,7 +83,7 @@ class QuestionDetailSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             'id', 'prompt', 'question_type', 'question_type_display',
-            'points', 'correct_answer_text',
+            'correct_answer_text',
             'section', 'section_name', 'chapter_name', 'subject_name',
             'created_by', 'created_at', 'updated_at', 'is_active',
             'options'
@@ -96,18 +96,13 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             'section', 'question_type', 'prompt', 
-            'points', 'correct_answer_text', 'options'
+            'correct_answer_text', 'options'
         ]
     
     def validate_section(self, value):
         request = self.context.get('request')
         if request and value.chapter.subject.created_by != request.user:
             raise serializers.ValidationError("You don't have permission to add questions to this section.")
-        return value
-    
-    def validate_points(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Points must be greater than 0")
         return value
     
     def create(self, validated_data):

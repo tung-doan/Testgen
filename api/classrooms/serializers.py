@@ -7,7 +7,13 @@ class StudentSerializer(serializers.ModelSerializer):
     classroom = serializers.PrimaryKeyRelatedField(queryset=Classroom.objects.all())
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     average_score = serializers.FloatField(read_only=True)
-    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    password = serializers.CharField(
+        write_only=True, 
+        required=True,
+        allow_blank=False,
+        min_length=6,  # Add minimum length validation
+        help_text="Password must be at least 6 characters"
+    )
     class Meta:
         model = Student
         fields = ['id', 'name', 'student_id', 'classroom', 'date_of_birth', 'average_score', 'created_at', 'password']
@@ -18,13 +24,21 @@ class StudentSerializer(serializers.ModelSerializer):
         student_id = data.get('student_id')
         if student_id and Student.objects.filter(student_id=student_id).exists():
             raise serializers.ValidationError({"student_id": "Student ID must be unique."})
+        
+        if self.instance is None:  # Only on create
+            password = data.get('password')
+            if not password:
+                raise serializers.ValidationError({"password": "Password is required when creating a student."})
+            if len(password) < 6:
+                raise serializers.ValidationError({"password": "Password must be at least 6 characters long."})
+        
         return data
+    
     def create(self, validated_data):
-        pwd = validated_data.pop('password', None)
+        pwd = validated_data.pop('password')
         date_of_birth = validated_data.pop('date_of_birth', None)
         student = super().create(validated_data)
-        if pwd or date_of_birth:
-            student.create_user_account(raw_password=pwd, date_of_birth=date_of_birth)
+        student.create_user_account(raw_password=pwd, date_of_birth=date_of_birth)
         
         return student
 

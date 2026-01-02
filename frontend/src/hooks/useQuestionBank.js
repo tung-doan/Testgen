@@ -50,6 +50,34 @@ export function useQuestionBank() {
     }
   }, []);
 
+  const deleteChapter = useCallback(async (id) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await QuestionBankService.deleteChapter(id);
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || "Failed to delete chapter";
+      setError(errorMsg);
+      throw new Error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const deleteSection = useCallback(async (id) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await QuestionBankService.deleteSection(id);
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || "Failed to delete section";
+      setError(errorMsg);
+      throw new Error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Chapter operations
   const fetchChapters = useCallback(async (subjectId = null) => {
     try {
@@ -186,8 +214,10 @@ export function useQuestionBank() {
     deleteSubject,
     fetchChapters,
     createChapter,
+    deleteChapter,
     fetchSections,
     createSection,
+    deleteSection,
     fetchQuestions,
     createQuestion,
     uploadQuestions,

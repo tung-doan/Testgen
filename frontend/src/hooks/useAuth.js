@@ -11,6 +11,7 @@ import {
   getUserInfo,
   refreshToken,
   loginUser,
+  loginStudent,
   registerUser,
 } from "@/utils/auth.js";
 
@@ -22,6 +23,34 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = () => {
+    try {
+      setLoading(true);
+
+      const storedUser = localStorage.getItem("user");
+
+      if (!storedUser) {
+        clearAuth();
+        return;
+      }
+
+      const userData = JSON.parse(storedUser);
+      setUser(userData);
+      setIsAuthenticated(true);
+    } catch (err) {
+      console.error("Auth check failed:", err);
+      clearAuth();
+      localStorage.removeItem("user");
+      localStorage.removeItem("student");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const clearAuth = useCallback(() => {
     setUser(null);
@@ -53,14 +82,46 @@ export const AuthProvider = ({ children }) => {
   }, [clearAuth]);
 
   const login = useCallback(
-    async (username, password) => {
+    async (credentials, isStudentLogin = false) => {
       try {
         setActionLoading(true);
         setAuthError(null);
 
-        const response = await loginUser(username, password);
+        let response = null;
 
-        await refreshUser();
+        if (isStudentLogin) {
+          // ✅ Student login - Use loginStudent service
+          const { studentId, password } = credentials;
+
+          if (!studentId || !password) {
+            throw new Error("Please enter both Student ID and password");
+          }
+
+          // ✅ Call loginStudent from utils/auth.js
+          response = await loginStudent(studentId, password);
+
+          // Store student info
+          if (response.student) {
+            localStorage.setItem("student", JSON.stringify(response.student));
+          }
+        } else {
+          // ✅ Teacher login - Use loginUser service
+          const { username, password } = credentials;
+
+          if (!username || !password) {
+            throw new Error("Please fill in all fields");
+          }
+
+          // ✅ Call loginUser from utils/auth.js
+          response = await loginUser(username, password);
+        }
+
+        // ✅ Store user data for both teacher and student
+        if (response && response.user) {
+          localStorage.setItem("user", JSON.stringify(response.user));
+          setUser(response.user);
+          setIsAuthenticated(true);
+        }
 
         return response;
       } catch (error) {
@@ -68,12 +129,13 @@ export const AuthProvider = ({ children }) => {
         const errorMessage =
           error.message || "Login failed. Please check your credentials.";
         setAuthError(errorMessage);
+        clearAuth();
         throw new Error(errorMessage);
       } finally {
         setActionLoading(false);
       }
     },
-    [refreshUser]
+    [clearAuth]
   );
 
   const register = useCallback(async (userData) => {
@@ -103,7 +165,8 @@ export const AuthProvider = ({ children }) => {
     try {
       setActionLoading(true);
       setAuthError(null);
-
+      localStorage.removeItem("user");
+      localStorage.removeItem("student");
       await logoutUser();
       clearAuth();
 
@@ -111,7 +174,8 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Logout failed:", error);
       setAuthError(error.message || "Logout failed. Please try again.");
-
+      localStorage.removeItem("user");
+      localStorage.removeItem("student");
       clearAuth();
 
       return false;

@@ -60,13 +60,13 @@ export default function Class() {
       <Header />
       <Navbar />
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 to-blue-200 p-4">
-        <Card className="w-full max-w-5xl shadow-xl border-0 transition-transform hover:scale-[1.02]">
+        <Card className="w-full max-w-5xl shadow-xl border-0 transition-transform hover:scale-[1.02] !p-0">
           <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-t-lg flex justify-between items-center">
-            <CardTitle className="text-2xl font-semibold">
+            <CardTitle className="text-2xl font-semibold p-4">
               Your Classes
             </CardTitle>
             <Link href="/class/create-class">
-              <Button className="bg-green-600 hover:bg-green-700">
+              <Button className="bg-green-600 hover:bg-green-700 mr-4 cursor-pointer">
                 Create New Class
               </Button>
             </Link>
@@ -110,7 +110,7 @@ export default function Class() {
                       <TableCell>
                         <Button
                           onClick={(e) => handleDeleteClass(classroom.id, e)}
-                          className="bg-red-600 hover:bg-red-700"
+                          className="bg-red-600 hover:bg-red-700 cursor-pointer"
                         >
                           Delete
                         </Button>

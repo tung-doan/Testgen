@@ -66,8 +66,6 @@ class Question(models.Model):
         default=QuestionType.MULTIPLE_CHOICE
     )
     
-    points = models.FloatField(default=1.0, help_text="Điểm tối đa cho câu hỏi này")
-    
     # Dùng cho Fill in the Blanks
     correct_answer_text = models.TextField(
         blank=True, 
@@ -95,20 +93,14 @@ class AnswerOption(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='options')
     text = models.TextField(help_text="Nội dung lựa chọn")
     
-    # 1. Multiple Choice (% điểm)
-    score_percentage = models.FloatField(
-        default=0.0, 
-        help_text="MC: 100.0 = đúng hoàn toàn, 50.0 = đúng một phần, 0.0 = sai"
-    )
-    
-    # 2. True/False Extended
+    # True/False Extended
     is_correct_bool = models.BooleanField(
         null=True, 
         blank=True, 
         help_text="TFE: True/False - đáp án đúng"
     )
     
-    # 3. Ordering
+    # Ordering
     correct_order = models.IntegerField(
         null=True, 
         blank=True, 
@@ -128,8 +120,8 @@ class AnswerOption(models.Model):
     @property
     def is_correct(self):
         """Helper property để check đáp án đúng cho mọi loại câu hỏi"""
-        if self.score_percentage > 0:  # Multiple Choice
-            return True
         if self.is_correct_bool is not None:  # True/False
             return self.is_correct_bool
+        if self.correct_order is not None:  # Ordering
+            return True
         return False

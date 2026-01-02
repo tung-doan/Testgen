@@ -240,3 +240,39 @@
 .page-loaded {
   animation: fadeIn 0.3s ease-in;
 }
+
+/* Fix CardHeader gap */
+[data-slot="card-header"] {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Or more specific for gradient headers */
+.bg-gradient-to-r[data-slot="card-header"] {
+  padding: 0 !important;
+}
+
+/* Fix CardHeader padding */
+[data-slot="card-header"] {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Fix CardContent padding */
+[data-slot="card-content"] {
+  padding: 1.5rem !important;
+}
+
+[data-slot="card"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0 !important;
+}
+
+
+/* Smooth transitions */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}

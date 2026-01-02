@@ -13,6 +13,14 @@ const AuthService = {
     }
   },
 
+  studentLogin: async (studentId, password) => {
+    const response = await apiClient.post("users/student-login/", {
+      student_id: studentId,
+      password,
+    });
+    return response.data;
+  },
+
   register: async (userData) => {
     try {
       const response = await apiClient.post("users/register/", userData);

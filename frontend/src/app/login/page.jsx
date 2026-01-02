@@ -27,7 +27,7 @@ export default function LoginPage() {
     }
 
     try {
-      await login(username, password);
+      await login({ username, password }, false);
       router.push("/class");
     } catch (error) {
       setFormError(error.message || "Login failed");
@@ -111,7 +111,7 @@ export default function LoginPage() {
               {/* Submit Button */}
               <Button
                 type="submit"
-                className="w-full h-12 mt-6 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg text-base font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
+                className="w-full h-12 mt-6 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg text-base font-semibold shadow-lg hover:shadow-xl hover:cursor-pointer transition-all duration-300"
                 disabled={actionLoading}
               >
                 {actionLoading ? (
@@ -135,7 +135,7 @@ export default function LoginPage() {
                 <Link href="/student/login">
                   <Button
                     variant="outline"
-                    className="w-full h-11 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 rounded-lg font-semibold transition-all duration-300 group"
+                    className="w-full h-11 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 rounded-lg font-semibold transition-all duration-300 group hover:cursor-pointer"
                   >
                     <GraduationCap className="h-5 w-5 mr-2 group-hover:scale-110 transition-transform" />
                     Login as Student
