@@ -1,6 +1,6 @@
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import serializers
@@ -46,7 +46,87 @@ class ClassroomViewSet(viewsets.ModelViewSet):
 
         serializer = StudentSerializer(students_data, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_student_classroom_info(request):
+    try:
+        student_pk = request.query_params.get('student_id')
+        
+        if not student_pk:
+            return Response(
+                {'error': 'student_id query parameter is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate integer
+        try:
+            student_pk = int(student_pk)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'student_id must be a valid integer'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        try:
+            requesting_student = Student.objects.select_related('classroom__teacher', 'user').get(id=student_pk)
+        except Student.DoesNotExist:
+            return Response(
+                {'error': f'Student with id {student_pk} not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        classroom = requesting_student.classroom
+        if not classroom:
+            return Response(
+                {'error': 'Student is not assigned to any classroom'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        classmates = Student.objects.filter(classroom=classroom).select_related('user').order_by('name')
+        
+        classmates_data = []
+        for student in classmates:
+            date_of_birth = None
+            if student.user and hasattr(student.user, 'date_of_birth'):
+                date_of_birth = student.user.date_of_birth
+            
+            classmates_data.append({
+                'id': student.id,
+                'name': student.name,
+                'student_id': student.student_id,
+                'date_of_birth': date_of_birth,  
+                'average_score': student.average_score,
+            })
+        
+        # Get teacher info
+        teacher_info = None
+        if classroom.teacher:
+            teacher_info = {
+                'name': classroom.teacher.username,
+                'email': classroom.teacher.email or 'N/A',
+            }
+        
+        enrollment_date = requesting_student.created_at
+        
+        return Response({
+            'id': classroom.id,
+            'name': classroom.name,
+            'description': classroom.description,
+            'teacher': teacher_info,
+            'total_students': classmates.count(),
+            'classmates': classmates_data,
+            'enrollment_date': enrollment_date,
+            'created_at': classroom.created_at,
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 class StudentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = StudentSerializer

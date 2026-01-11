@@ -61,6 +61,22 @@ export function useOnlineExam() {
     }
   }, []);
 
+  const getCompletedExams = useCallback(async (studentId) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await OnlineExamService.getCompletedExams(studentId);
+      return response.data;
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || "Failed to fetch completed exams";
+      setError(errorMsg);
+      throw new Error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     loading,
     error,
@@ -68,5 +84,6 @@ export function useOnlineExam() {
     startExam,
     getExamAttempt,
     submitExam,
+    getCompletedExams,
   };
 }

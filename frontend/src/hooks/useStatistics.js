@@ -12,7 +12,7 @@ export function useStatistics() {
       setLoading(true);
       setError(null);
       const response = await axios.get(
-        `${apiUrl}api/statistics/top-students/`,
+        `${apiUrl}statistics/top-students/`,
         {
           withCredentials: true,
         }
@@ -33,7 +33,7 @@ export function useStatistics() {
       setLoading(true);
       setError(null);
       const response = await axios.get(
-        `${apiUrl}api/statistics/test-statistics/`,
+        `${apiUrl}statistics/test-statistics/`,
         {
           withCredentials: true,
         }
@@ -55,7 +55,7 @@ export function useStatistics() {
         setLoading(true);
         setError(null);
         const response = await axios.get(
-          `${apiUrl}api/statistics/${testId}/test-question-stats/`,
+          `${apiUrl}statistics/${testId}/test-question-stats/`,
           { withCredentials: true }
         );
         return response.data;

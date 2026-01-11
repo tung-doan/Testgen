@@ -23,6 +23,63 @@ const ClassroomService = {
     }
   },
 
+  getStudentClassrooms: async (studentId) => {
+    try {
+      const response = await apiClient.get(
+        `classroom/student-classrooms/?student_id=${studentId}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch classrooms"
+      );
+    }
+  },
+
+  getClassroomDetail: async (
+    classroomId,
+    studentId,
+    page = 1,
+    pageSize = 20
+  ) => {
+    try {
+      const response = await apiClient.get(
+        `classroom/${classroomId}/detail/?student_id=${studentId}&page=${page}&page_size=${pageSize}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch classroom detail"
+      );
+    }
+  },
+
+  addStudentToClassroom: async (classroomId, studentData) => {
+    try {
+      const response = await apiClient.post(
+        `classroom/${classroomId}/add_student/`,
+        studentData
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || "Failed to add student");
+    }
+  },
+
+  removeStudentFromClassroom: async (classroomId, studentId) => {
+    try {
+      const response = await apiClient.post(
+        `classroom/${classroomId}/remove_student/`,
+        { student_id: studentId }
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to remove student"
+      );
+    }
+  },
+
   createClassroom: async (classroomData) => {
     try {
       const response = await apiClient.post("classroom/", classroomData);

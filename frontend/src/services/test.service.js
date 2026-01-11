@@ -3,7 +3,7 @@ import apiClient from './api-client';
 const TestService = {
   getAllTests: async () => {
     try {
-      const response = await apiClient.get('api/tests/');
+      const response = await apiClient.get('tests/');
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to fetch tests');
@@ -12,7 +12,7 @@ const TestService = {
 
   getTestSummary: async () => {
     try {
-      const response = await apiClient.get('api/tests/test_summary/');
+      const response = await apiClient.get('tests/test_summary/');
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to fetch test summary');
@@ -21,7 +21,7 @@ const TestService = {
 
   getTestById: async (testId) => {
     try {
-      const response = await apiClient.get(`api/tests/${testId}/`);
+      const response = await apiClient.get(`tests/${testId}/`);
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to fetch test details');
@@ -30,7 +30,7 @@ const TestService = {
 
   createTest: async (testData) => {
     try {
-      const response = await apiClient.post('api/tests/', testData);
+      const response = await apiClient.post('tests/', testData);
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to create test');
@@ -39,7 +39,7 @@ const TestService = {
 
   deleteTest: async (testId) => {
     try {
-      const response = await apiClient.delete(`api/tests/${testId}/`);
+      const response = await apiClient.delete(`tests/${testId}/`);
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to delete test');
@@ -49,7 +49,7 @@ const TestService = {
   saveAnswerKeys: async (testId, answerKeys) => {
     try {
       const response = await apiClient.post(
-        `api/tests/${testId}/save_answer_keys/`,
+        `tests/${testId}/save_answer_keys/`,
         { answer_keys: answerKeys }
       );
       return response.data;
@@ -60,7 +60,7 @@ const TestService = {
 
   getAnswerKeys: async (testId) => {
     try {
-      const response = await apiClient.get(`api/tests/${testId}/get_answer_keys/`);
+      const response = await apiClient.get(`tests/${testId}/get_answer_keys/`);
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to fetch answer keys');
@@ -70,7 +70,7 @@ const TestService = {
   previewTestPDF: async (testData) => {
     try {
       const response = await apiClient.post(
-        'api/tests/preview_test_pdf/',
+        'tests/preview_test_pdf/',
         testData,
         {
           responseType: 'blob',

@@ -122,15 +122,43 @@ export function useClassroom() {
     [apiUrl]
   );
 
+  const getClassroomStudentInfo = useCallback(
+    async (studentId) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await axios.get(
+          `${apiUrl}classroom/student-info/?student_id=${studentId}`,
+          {
+            withCredentials: true,
+          }
+        );
+        return response.data;
+      } catch (err) {
+        const errorMsg =
+          err.response?.data?.error || "Failed to fetch classroom info";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [apiUrl]
+  );
+
   const addStudent = useCallback(
     async (classroomId, studentData) => {
       try {
         setLoading(true);
         setError(null);
         const payload = { ...studentData, classroom: classroomId };
-        const response = await axios.post(`${apiUrl}classroom/students/`, payload, {
-          withCredentials: true,
-        });
+        const response = await axios.post(
+          `${apiUrl}classroom/students/`,
+          payload,
+          {
+            withCredentials: true,
+          }
+        );
         return response.data;
       } catch (err) {
         const errorMsg = err.response?.data?.error || "Failed to add student";
@@ -177,6 +205,7 @@ export function useClassroom() {
     getStudents,
     addStudent,
     deleteStudent,
+    getClassroomStudentInfo,
   };
 }
 

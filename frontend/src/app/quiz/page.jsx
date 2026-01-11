@@ -48,7 +48,7 @@ export default function TestSummary() {
   };
 
   const handleCreateTest = () => {
-    router.push("/create-test");
+    router.push("/create-test/paper/");
   };
 
   const handleTestClick = (testId) => {

@@ -111,6 +111,9 @@ const OnlineExamService = {
       );
     }
   },
+  getCompletedExams: (studentId) => {
+    return apiClient.get(`online-exams/attempts/?student=${studentId}&status=COMPLETED`);
+  },
 
   startExam: async (examId, studentId) => {
     try {

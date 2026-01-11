@@ -42,7 +42,7 @@ export default function TestForm() {
       };
       // Gửi yêu cầu POST tới API để lưu bài kiểm tra
       const response = await axios.post(
-        process.env.NEXT_PUBLIC_API_URL + "api/tests/", 
+        process.env.NEXT_PUBLIC_API_URL + "tests/", 
         payload,
         {
           headers: {
@@ -84,7 +84,7 @@ export default function TestForm() {
   const handlePreview = async () => {
     try {
       const response = await axios.post(
-        process.env.NEXT_PUBLIC_API_URL + "api/tests/preview_test_pdf/",
+        process.env.NEXT_PUBLIC_API_URL + "tests/preview_test_pdf/",
         formData,
         {
           headers: {

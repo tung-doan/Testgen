@@ -16,7 +16,7 @@ export function useSubmission() {
         setUploadProgress(0);
 
         const response = await axios.post(
-          `${apiUrl}api/submissions/upload_submission/`,
+          `${apiUrl}submissions/upload_submission/`,
           formData,
           {
             headers: {
@@ -56,7 +56,7 @@ export function useSubmission() {
         if (studentId) params.append("student_id", studentId);
 
         const response = await axios.get(
-          `${apiUrl}api/submissions/submission_summary/?${params.toString()}`,
+          `${apiUrl}submissions/submission_summary/?${params.toString()}`,
           { withCredentials: true }
         );
         return response.data;
@@ -78,7 +78,7 @@ export function useSubmission() {
         setLoading(true);
         setError(null);
         const response = await axios.get(
-          `${apiUrl}api/submissions/${submissionId}/detail/`,
+          `${apiUrl}submissions/${submissionId}/detail/`,
           { withCredentials: true }
         );
         return response.data;
@@ -100,7 +100,7 @@ export function useSubmission() {
         setLoading(true);
         setError(null);
         const response = await axios.delete(
-          `${apiUrl}api/submissions/${submissionId}/`,
+          `${apiUrl}submissions/${submissionId}/`,
           { withCredentials: true }
         );
         return response.data;
@@ -127,7 +127,7 @@ export function useSubmission() {
         if (className) params.append("class", className);
 
         const response = await axios.get(
-          `${apiUrl}api/submissions/student_details/?${params.toString()}`,
+          `${apiUrl}submissions/student_details/?${params.toString()}`,
           { withCredentials: true }
         );
         return response.data;
