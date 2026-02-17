@@ -109,190 +109,125 @@ class TestViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def preview_test_pdf(self, request):
-        # try:
-        #     test_name = request.data.get('testName', 'ĐỀ KIỂM TRA')
-        #     num_choices = int(request.data.get('numChoices', 4))
-        #     num_questions = int(request.data.get('numQuestions', 30))  # Default to 30
-        #     multiple_choice = request.data.get('multipleChoice', 'yes') == 'yes'
-
-        #     if num_choices < 1 or num_choices > 26:
-        #         return Response({"error": "Số lựa chọn phải từ 1 đến 26"}, status=400)
-        #     if num_questions < 1 or num_questions > 50:
-        #         return Response({"error": "Số câu hỏi phải từ 1 đến 50"}, status=400)
-
-        #     buffer = BytesIO()
-        #     p = canvas.Canvas(buffer, pagesize=A4)
-        #     width, height = A4
-
-        #     # Constants
-        #     margin = 2 * cm
-        #     bubble_size = 0.35 * cm
-        #     choice_spacing = 0.9 * cm
-        #     line_spacing = 0.9 * cm
-        #     col_width = (width - 2 * margin) / 3
-        #     marker_size = 0.45 * cm
-        #     max_questions_per_col = 10
-
-        #     def draw_marker(x, y):
-        #         p.setFillColorRGB(0, 0, 0)
-        #         p.rect(x, y, marker_size, marker_size, fill=1)
-
-        #     # --- Draw 4 corner markers ---
-        #     # draw_marker(margin - marker_size, height - margin)
-        #     # draw_marker(width - margin, height - margin)
-        #     # draw_marker(margin - marker_size, margin - marker_size)
-        #     # draw_marker(width - margin, margin - marker_size)
-
-        #     # --- Tiêu đề ---
-        #     current_y = height - margin
-        #     p.setFont(font_name, 12)
-        #     p.drawCentredString(width / 2, current_y, test_name.upper())
-        #     current_y -= 1.5 * cm
-
-        #     # --- Họ tên và lớp ---
-        #     p.setFont(font_name, 10)
-        #     p.drawString(margin, current_y, "Họ và tên: ___________________________")
-        #     p.drawString(width / 2 + 3 * cm, current_y, "Lớp: ________________")
-        #     current_y -= 1.5 * cm
-
-        #     # --- Chia câu hỏi mỗi cột 10 câu ---
-        #     p.setFont(font_name, 8)
-        #     num_cols = (num_questions + max_questions_per_col - 1) // max_questions_per_col
-
-        #     # Calculate the total width of the question row (number + choices)
-        #     question_row_width = 0.6 * cm + num_choices * (bubble_size + choice_spacing)
-
-        #     for col_index in range(num_cols):
-        #         start_q = col_index * max_questions_per_col + 1
-        #         end_q = min(start_q + max_questions_per_col - 1, num_questions)
-
-        #         # Center the column within its allocated space
-        #         x_col_start = margin + (col_index % 3) * col_width
-        #         x_col_center_offset = (col_width - question_row_width) / 2
-        #         x_start = x_col_start + x_col_center_offset
-
-        #         # Adjust y position for rows (if more than 3 columns, stack vertically)
-        #         y = current_y - (col_index // 3) * (max_questions_per_col * line_spacing + 1.0 * cm)
-
-        #         for q_num in range(start_q, end_q + 1):
-        #             if q_num == 1:
-        #                 print(f"Tọa độ đầu số 1: ({x_start}cm, {y}cm)")
-        #             p.setFont("Helvetica-Bold", 9)  # Số to rõ hơn và đậm
-        #             p.setLineWidth(1)  # Dành cho bubble
-        #             p.setFillColorRGB(0, 0, 0)
-        #             p.drawString(x_start, y, f"{q_num}")
-        #             x_choices = x_start + 0.6 * cm
-        #             for i in range(num_choices):
-        #                 letter = chr(65 + i)
-        #                 if multiple_choice:
-        #                     # Vẽ ô vuông nếu multipleChoice là 'yes'
-        #                     p.setLineWidth(1.5)  # Làm viền đậm hơn
-        #                     p.rect(x_choices, y - bubble_size / 2, bubble_size, bubble_size, fill=0)
-        #                 else:
-        #                     # Vẽ hình tròn nếu multipleChoice là 'no'
-        #                     p.setLineWidth(1.5)  # Làm viền đậm hơn
-        #                     p.circle(x_choices + bubble_size / 2, y, bubble_size / 2, fill=0)
-        #                 p.setFont(font_name, 8)  # Để chữ cái A, B, C... nhỏ vừa
-        #                 p.drawString(x_choices + bubble_size + 0.05 * cm, y - 0.1 * cm, letter)
-        #                 x_choices += choice_spacing
-        #             y -= line_spacing
-
-        #         # Keep track of the lowest y position for the "Mã Đề" placement
-        #         if col_index == num_cols - 1:
-        #             lowest_y = y
-
-        #     # # --- Mã đề ---
-        #     # p.setFont(font_name, 8)
-        #     # code_y = lowest_y - 0.5 * cm  # Reduced gap to 0.5 cm below the last question row
-        #     # p.drawString(width - margin - 4.5 * cm, code_y + 0.7 * cm, "Mã Đề")
-        #     # for i in range(1, 5):
-        #     #     x = width - margin - 4.5 * cm + (i - 1) * 1.2 * cm
-        #     #     p.circle(x + bubble_size / 2, code_y, bubble_size / 2, fill=0)
-        #     #     p.drawString(x + bubble_size + 0.05 * cm, code_y - 0.1 * cm, str(i))
-                
-        #     # --- Dải barcode dọc ---
-        #     # p.saveState()
-        #     # p.translate(margin - 0.8 * cm, height / 2)
-        #     # p.rotate(90)
-        #     # p.setFont(font_name, 6)
-        #     # p.setLineWidth(0.05 * cm)
-        #     # for i in range(5):
-        #     #     p.line(0.2 * cm + i * 0.1 * cm, -2 * cm, 0.2 * cm + i * 0.1 * cm, 2 * cm)
-        #     # p.restoreState()
-
-        #     p.showPage()
-        #     p.save()
-        #     buffer.seek(0)
-
-        #     return FileResponse(buffer, as_attachment=False, filename='preview_test.pdf', content_type='application/pdf')
-    
-        # except Exception as e:
-        #     return Response({"error": str(e)}, status=500)
         try:
             test_name = request.data.get('testName', 'ĐỀ KIỂM TRA')
             num_choices = int(request.data.get('numChoices', 4))
-            num_questions = int(request.data.get('numQuestions', 25))  # Tối đa 30 câu
-            multiple_choice = request.data.get('multipleChoice', 'yes') == 'yes'
-
-            if num_choices < 1 or num_choices > 26:
-                return Response({"error": "Số lựa chọn phải từ 1 đến 26"}, status=400)
-            if num_questions < 1 or num_questions > 25:
-                return Response({"error": "Số câu hỏi phải từ 1 đến 25"}, status=400)
-
+            num_questions = int(request.data.get('numQuestions', 50)) 
+            
+            # Cấu hình giấy A4
             buffer = BytesIO()
-            p = canvas.Canvas(buffer, pagesize=A4)
+            c = canvas.Canvas(buffer, pagesize=A4)
             width, height = A4
+            
+            # --- CẤU HÌNH TỌA ĐỘ ---
+            margin_x = 1.0 * cm
+            margin_y = 1.0 * cm
+            
+            # 1. VẼ 4 ĐIỂM ĐỊNH VỊ (MARKERS) - QUAN TRỌNG CHO CAMERA
+            # Các ô vuông đen ở 4 góc để camera nhận diện
+            marker_size = 0.6 * cm
+            c.setFillColorRGB(0, 0, 0) # Màu đen
+            
+            # Góc trên trái
+            c.rect(margin_x, height - margin_y - marker_size, marker_size, marker_size, fill=1)
+            # Góc trên phải
+            c.rect(width - margin_x - marker_size, height - margin_y - marker_size, marker_size, marker_size, fill=1)
+            # Góc dưới trái
+            c.rect(margin_x, margin_y, marker_size, marker_size, fill=1)
+            # Góc dưới phải
+            c.rect(width - margin_x - marker_size, margin_y, marker_size, marker_size, fill=1)
 
-            # Constants
-            margin = 2 * cm
-            bubble_size = 0.35 * cm
-            choice_spacing = 0.9 * cm
-            line_spacing = 0.9 * cm
+            # 2. VẼ HEADER (Khung tên, lớp...)
+            header_top = height - margin_y - 2.0 * cm
+            c.setLineWidth(1)
+            c.setFillColorRGB(0, 0, 0)
+            
+            # Tên bài thi
+            c.setFont(font_name, 14)
+            c.drawCentredString(width/2, header_top + 1.0*cm, test_name.upper())
+            
+            c.setFont(font_name, 10)
+            # Vẽ các dòng kẻ điền thông tin
+            c.drawString(margin_x + 2*cm, header_top, "Tên: _______________________________________  Ngày: ____/____")
+            c.drawString(margin_x + 2*cm, header_top - 0.8*cm, "Lớp: ___________________  Bài thi: ________________________")
 
-            # --- Tiêu đề ---
-            current_y = height - margin
-            p.setFont(font_name, 12)
-            p.drawCentredString(width / 2, current_y, test_name.upper())
-            current_y -= 1.5 * cm
+            # 3. VẼ KHUNG MÃ SỐ SINH VIÊN (Student ZipGrade ID) - Bên trái
+            # Đây là phần đặc trưng của ZipGrade nằm bên trái
+            id_grid_top = header_top - 2.5 * cm
+            id_x_start = margin_x + 0.5 * cm
+            
+            c.setFont(font_name, 8)
+            c.drawString(id_x_start, id_grid_top + 0.5*cm, "SBD / MSSV")
+            
+            # Cấu hình kích thước ô tô
+            bubble_radius = 0.18 * cm
+            col_spacing = 0.5 * cm
+            row_spacing = 0.45 * cm
+            
+            # Khung bao quanh phần SBD
+            c.rect(id_x_start - 0.2*cm, id_grid_top - (10 * row_spacing) - 0.5*cm, 
+                   (5 * col_spacing) + 0.8*cm, (11 * row_spacing) + 1.5*cm)
 
-            # --- Họ tên và lớp ---
-            p.setFont(font_name, 10)
-            p.drawString(margin, current_y, "Họ và tên: ___________________________")
-            p.drawString(width / 2 + 3 * cm, current_y, "Lớp: ________________")
-            current_y -= 1.5 * cm
+            # Vẽ cột số 0-9 dọc và các ô tròn tương ứng
+            for i in range(10): # 0 đến 9
+                y_pos = id_grid_top - 1.0*cm - (i * row_spacing)
+                # Số hiển thị bên trái
+                c.drawString(id_x_start, y_pos - 0.1*cm, str(i))
+                
+                # 5 cột ô tròn để tô mã số
+                for j in range(5): 
+                    x_pos = id_x_start + 0.8*cm + (j * col_spacing)
+                    c.circle(x_pos, y_pos, bubble_radius)
+            
+            # Ô vuông điền số ở trên cùng (để học sinh viết số vào)
+            for j in range(5):
+                c.rect(id_x_start + 0.6*cm + (j * col_spacing), id_grid_top - 0.6*cm, 0.4*cm, 0.6*cm)
 
-            # --- Hiển thị câu hỏi 1 cột ---
-            p.setFont(font_name, 8)
-
-            # Tính x_start sao cho câu hỏi nằm chính giữa
-            question_row_width = 0.6 * cm + num_choices * (bubble_size + choice_spacing)
-            # x_start = margin + (width - 2 * margin - question_row_width) / 2
-            x_start = margin
-            y = current_y
-
+            # 4. VẼ CÂU HỎI (Chia cột)
+            # Tính toán vị trí bắt đầu cho phần câu hỏi (Bên phải phần SBD)
+            q_start_x = id_x_start + 4.0 * cm 
+            q_start_y = id_grid_top
+            
+            # Cấu hình chia cột: 20 câu mỗi cột
+            questions_per_col = 20 
+            col_width = 4.5 * cm # Khoảng cách giữa các cột câu hỏi lớn
+            
+            current_col = 0
+            current_row_in_col = 0
+            
+            c.setFont(font_name, 8)
+            
             for q_num in range(1, num_questions + 1):
-                p.setFont("Helvetica-Bold", 9)
-                p.setLineWidth(1)
-                p.setFillColorRGB(0, 0, 0)
-                p.drawString(x_start, y, f"{q_num}")
-                x_choices = x_start + 0.6 * cm
+                # Tính toán tọa độ X, Y dựa trên cột hiện tại và dòng hiện tại
+                x_base = q_start_x + (current_col * col_width)
+                y_base = q_start_y - (current_row_in_col * row_spacing)
+                
+                # Logic chuyển cột: Nếu dòng hiện tại vượt quá số câu quy định -> Sang cột mới
+                if current_row_in_col >= questions_per_col:
+                    current_col += 1
+                    current_row_in_col = 0
+                    # Tính lại tọa độ cho câu đầu tiên của cột mới
+                    x_base = q_start_x + (current_col * col_width)
+                    y_base = q_start_y
+                
+                # Vẽ số câu hỏi
+                c.drawString(x_base, y_base - 0.1*cm, str(q_num))
+                
+                # Vẽ các lựa chọn A, B, C, D...
                 for i in range(num_choices):
-                    letter = chr(65 + i)
-                    if multiple_choice:
-                        p.setLineWidth(1.5)
-                        p.rect(x_choices, y - bubble_size / 2, bubble_size, bubble_size, fill=0)
-                    else:
-                        p.setLineWidth(1.5)
-                        p.circle(x_choices + bubble_size / 2, y, bubble_size / 2, fill=0)
-                    p.setFont(font_name, 8)
-                    p.drawString(x_choices + bubble_size + 0.05 * cm, y - 0.1 * cm, letter)
-                    x_choices += choice_spacing
-                y -= line_spacing
+                    choice_char = chr(65 + i) # 65 là mã ASCII của 'A'
+                    x_choice = x_base + 0.6*cm + (i * 0.6*cm) # Khoảng cách giữa các ô chọn
+                    
+                    # Vẽ vòng tròn
+                    c.circle(x_choice, y_base, bubble_radius)
+                    # Vẽ chữ cái A, B... đè lên giữa vòng tròn
+                    c.drawCentredString(x_choice, y_base - 0.1*cm, choice_char)
+                
+                current_row_in_col += 1
 
-            p.showPage()
-            p.save()
+            c.showPage()
+            c.save()
             buffer.seek(0)
-
             return FileResponse(buffer, as_attachment=False, filename='preview_test.pdf', content_type='application/pdf')
 
         except Exception as e:

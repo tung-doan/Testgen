@@ -207,7 +207,7 @@ export default function StudentDashboard() {
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 py-8 px-4">
         <div className="max-w-7xl mx-auto space-y-6">
           {/* Welcome Header */}
-          <Card className="border-0 shadow-xl overflow-hidden !p-0">
+          <Card className="border-0 shadow-xl overflow-hidden !p-0 mb-4">
             <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white !p-0 !m-0">
               <div className="flex items-center justify-between px-6 py-6">
                 <div>
@@ -231,7 +231,7 @@ export default function StudentDashboard() {
           </Card>
 
           {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-4">
             {/* Total Exams */}
             <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
               <CardContent className="pt-6">
@@ -301,10 +301,10 @@ export default function StudentDashboard() {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-4">
             {/* Pending Exams List */}
-            <Card className="border-0 shadow-xl">
-              <CardHeader className="border-b bg-gradient-to-r from-orange-50 to-amber-50">
+            <Card className="border-0 shadow-xl !p-0 rounded-t-lg">
+              <CardHeader className="border-b bg-gradient-to-r from-orange-50 to-amber-50 rounded-t-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="bg-orange-100 p-2 rounded-lg">
@@ -376,8 +376,8 @@ export default function StudentDashboard() {
             </Card>
 
             {/* ✅ Score Trend Chart */}
-            <Card className="border-0 shadow-xl">
-              <CardHeader className="border-b bg-gradient-to-r from-green-50 to-emerald-50">
+            <Card className="border-0 shadow-xl !p-0">
+              <CardHeader className="border-b bg-gradient-to-r from-green-50 to-emerald-50 rounded-t-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="bg-green-100 p-2 rounded-lg">
@@ -413,8 +413,8 @@ export default function StudentDashboard() {
           </div>
 
           {/* Quick Actions */}
-          <Card className="border-0 shadow-xl">
-            <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-purple-50">
+          <Card className="border-0 shadow-xl !p-0">
+            <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-purple-50 rounded-t-lg">
               <CardTitle className="flex items-center gap-2">
                 <div className="bg-indigo-100 p-2 rounded-lg">
                   <BookOpen className="h-5 w-5 text-indigo-600" />

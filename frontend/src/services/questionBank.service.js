@@ -34,7 +34,7 @@ const QuestionBankService = {
 
   updateChapter: (id, data) =>
     apiClient.put(`question-bank/chapters/${id}/`, data),
-  deleteChapter: (id) => apiClient.delete(`/api/question-bank/chapters/${id}/`),
+  deleteChapter: (id) => apiClient.delete(`/question-bank/chapters/${id}/`),
 
   getChapterSections: (chapterId) =>
     apiClient.get(`question-bank/chapters/${chapterId}/sections/`),
@@ -67,16 +67,13 @@ const QuestionBankService = {
     return apiClient.get(`question-bank/questions/?${params}`);
   },
 
-  createQuestion: (data) =>
-    apiClient.post("question-bank/questions/", data),
+  createQuestion: (data) => apiClient.post("question-bank/questions/", data),
   updateQuestion: (id, data) =>
     apiClient.put(`question-bank/questions/${id}/`, data),
 
-  deleteQuestion: (id) =>
-    apiClient.delete(`question-bank/questions/${id}/`),
+  deleteQuestion: (id) => apiClient.delete(`question-bank/questions/${id}/`),
 
-  getQuestionDetails: (id) =>
-    apiClient.get(`question-bank/questions/${id}/`),
+  getQuestionDetails: (id) => apiClient.get(`question-bank/questions/${id}/`),
 
   duplicateQuestion: (id) =>
     apiClient.post(`question-bank/questions/${id}/duplicate/`),
@@ -88,7 +85,7 @@ const QuestionBankService = {
       formData,
       {
         headers: { "Content-Type": "multipart/form-data" },
-      }
+      },
     );
   },
 
