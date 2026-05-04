@@ -9,13 +9,13 @@ from .serializers import (
     ExamSerializer, ExamCreateUpdateSerializer, ExamDetailForAttemptSerializer,
     ExamAttemptSerializer, ExamAttemptCreateSerializer, 
     ExamAttemptSubmitSerializer, ExamAttemptResultSerializer,
-    ExamQuestionDetailSerializer
+    ExamQuestionDetailSerializer, ExamAttemptListSerializer
 )
 from classrooms.models import Student
 from django.db import transaction
 
 class ExamViewSet(viewsets.ModelViewSet):
-    """API cho Giáo viên: Tạo, Sửa, Xóa Đề thi"""
+    """API for Teachers: Create, Edit, Delete Exams"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
@@ -34,14 +34,14 @@ class ExamViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'])
     def questions(self, request, pk=None):
-        """Lấy danh sách câu hỏi của đề thi"""
+        """Get list of exam questions"""
         exam = self.get_object()
         exam_questions = exam.examquestion_set.all().select_related('question').prefetch_related('question__options')
         serializer = ExamQuestionDetailSerializer(exam_questions, many=True)
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
-    @transaction.atomic  # Đảm bảo tính toàn vẹn, lỗi là rollback hết
+    @transaction.atomic  # Ensure integrity, rollback on error
     def update_questions(self, request, pk=None):
         exam = self.get_object()
         
@@ -53,23 +53,23 @@ class ExamViewSet(viewsets.ModelViewSet):
 
         questions_data = request.data.get('questions', [])
         
-        # Danh sách ID câu hỏi mới gửi lên
+        # New question IDs sent
         new_question_ids = [item['question_id'] for item in questions_data]
         
-        # Danh sách ID câu hỏi hiện có trong DB
+        # Existing question IDs in DB
         current_exam_questions = ExamQuestion.objects.filter(exam=exam)
         current_map = {eq.question_id: eq for eq in current_exam_questions}
         
-        # A. XÁC ĐỊNH CÁC CÂU CẦN XÓA (Có trong DB nhưng không có trong list mới)
+        # A. IDENTIFY QUESTIONS TO DELETE (In DB but not in new list)
         ids_to_keep = set(new_question_ids)
         ExamQuestion.objects.filter(exam=exam).exclude(question_id__in=ids_to_keep).delete()
         
-        # B. XÁC ĐỊNH CÁC CÂU CẦN TẠO MỚI HOẶC UPDATE
+        # B. IDENTIFY QUESTIONS TO CREATE OR UPDATE
         to_create = []
         to_update = []
         
         from question_bank.models import Question
-        # Query một lần để lấy thông tin điểm mặc định nếu cần
+        # Query once to get default points info if needed
         all_questions_info = {q.id: q for q in Question.objects.filter(id__in=new_question_ids)}
 
         for item in questions_data:
@@ -81,15 +81,15 @@ class ExamViewSet(viewsets.ModelViewSet):
             new_order = item['order']
 
             if q_id in current_map:
-                # CÂU CŨ -> UPDATE
+                # EXISTING QUESTION -> UPDATE
                 existing_record = current_map[q_id]
-                # Chỉ update nếu có thay đổi để tiết kiệm query
+                # Only update if changed to save query
                 if existing_record.points != new_points or existing_record.order != new_order:
                     existing_record.points = new_points
                     existing_record.order = new_order
                     to_update.append(existing_record)
             else:
-                # CÂU MỚI -> CREATE
+                # NEW QUESTION -> CREATE
                 to_create.append(ExamQuestion(
                     exam=exam,
                     question=base_question,
@@ -97,7 +97,7 @@ class ExamViewSet(viewsets.ModelViewSet):
                     points=new_points
                 ))
 
-        # Thực hiện lệnh xuống DB
+        # Execute DB commands
         if to_create:
             ExamQuestion.objects.bulk_create(to_create)
         
@@ -106,16 +106,48 @@ class ExamViewSet(viewsets.ModelViewSet):
 
         return Response({"message": "Questions updated successfully"})
 
+    @action(detail=True, methods=['get'])
+    def attempts(self, request, pk=None):
+        """Get all attempts for an exam - used by teachers to view submissions"""
+        exam = self.get_object()
+        attempts = ExamAttempt.objects.filter(
+            exam=exam
+        ).select_related(
+            'student', 'student__user'
+        ).order_by('student__name', '-start_time')
+        serializer = ExamAttemptListSerializer(attempts, many=True)
+        return Response(serializer.data)
+
 class ExamAttemptViewSet(viewsets.ModelViewSet):
-    """API cho Học sinh: Làm bài và xem kết quả"""
+    """API for Students: Take exams and view results"""
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        return ExamAttempt.objects.select_related(
-            'exam', 'student', 'student__classroom'
+        queryset = ExamAttempt.objects.select_related(
+            'exam', 'student', 'student__user'
         ).prefetch_related(
+            'student__classrooms',
             'answers__question__options'
         )
+        
+        user = self.request.user
+        
+        # If student, only see own attempts
+        if hasattr(user, 'student_profile'):
+            queryset = queryset.filter(student=user.student_profile)
+        # If teacher, see attempts for exams they created
+        else:
+            queryset = queryset.filter(exam__created_by=user)
+            
+        student_id = self.request.query_params.get('student')
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+            
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+            
+        return queryset
     
     def get_serializer_class(self):
         if self.action == 'start_exam':
@@ -128,7 +160,7 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='pending-exams')
     def pending_exams(self, request):
-        """Lấy danh sách bài thi chưa làm của sinh viên"""
+        """Get list of pending exams for student"""
         student_id = request.query_params.get('student_id')
         
         if not student_id:
@@ -145,12 +177,12 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Lấy tất cả bài thi của lớp
+        # Get all exams for the classroom
         available_exams = Exam.objects.filter(
-            classroom=student.classroom
-        ).prefetch_related('examquestion_set')
+            classroom__in=student.classrooms.all()
+        ).prefetch_related('examquestion_set').distinct()
         
-        # Lọc bài chưa hoàn thành
+        # Filter pending exams
         pending_exams = []
         for exam in available_exams:
             attempts_made = ExamAttempt.objects.filter(
@@ -175,7 +207,7 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='start-exam')
     def start_exam(self, request):
-        """Bắt đầu làm bài thi"""
+        """Start taking an exam"""
         exam_id = request.data.get('exam_id')
         student_id = request.data.get('student_id')
         
@@ -188,7 +220,13 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
         exam = get_object_or_404(Exam, id=exam_id)
         student = get_object_or_404(Student, id=student_id)
         
-        # Kiểm tra số lần thử
+        if exam.classroom and exam.classroom not in student.classrooms.all():
+            return Response(
+                {"error": "You are not enrolled in this exam's classroom"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Check number of attempts
         attempts_count = ExamAttempt.objects.filter(
             exam=exam,
             student=student
@@ -200,7 +238,7 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Tạo attempt mới
+        # Create new attempt
         serializer = ExamAttemptCreateSerializer(data={
             'exam': exam_id,
             'student': student_id
@@ -218,7 +256,7 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'], url_path='submit-exam')
     def submit_exam(self, request, pk=None):
-        """Nộp bài thi"""
+        """Submit exam"""
         attempt = self.get_object()
         
         if attempt.status == 'COMPLETED':

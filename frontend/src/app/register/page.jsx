@@ -14,12 +14,11 @@ import {
 } from "@/components/ui/select";
 import React, { useState } from "react";
 import axios from "axios";
-import Router from "next/navigation";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import LoadingScreen from "../loading";
 
 export default function Frame() {
-  const router = Router.useRouter();
+  const router = useRouter();
   const apiurl = process.env.NEXT_PUBLIC_API_URL;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,6 +64,7 @@ export default function Frame() {
       })
       .then((response) => {
         console.log("Registration successful:", response.data);
+        window.dispatchEvent(new Event("navigation-start"));
         router.push("/login");
       })
       .catch((error) => {
@@ -81,7 +81,6 @@ export default function Frame() {
 
   return (
     <>
-      {isSubmitting && <LoadingScreen />}
       <Header />
       <div className="flex justify-center items-center min-h-screen bg-[#f3f7f5] p-6">
         <Card className="w-full max-w-xl p-8 rounded-3xl shadow-xl bg-white border-none">

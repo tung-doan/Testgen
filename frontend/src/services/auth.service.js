@@ -13,9 +13,9 @@ const AuthService = {
     }
   },
 
-  studentLogin: async (studentId, password) => {
+  studentLogin: async (identifier, password) => {
     const response = await apiClient.post("users/student-login/", {
-      student_id: studentId,
+      identifier,
       password,
     });
     return response.data;

@@ -1,146 +1,111 @@
 import { useState, useCallback } from "react";
-import axios from "axios";
+import SubmissionService from "@/services/submission.service";
 
 export function useSubmission() {
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const uploadSubmission = useCallback(async (formData, onProgress) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setUploadProgress(0);
 
-  const uploadSubmission = useCallback(
-    async (formData) => {
-      try {
-        setLoading(true);
-        setError(null);
-        setUploadProgress(0);
+      const data = await SubmissionService.uploadSubmission(formData);
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+      setUploadProgress(0);
+    }
+  }, []);
 
-        const response = await axios.post(
-          `${apiUrl}submissions/upload_submission/`,
-          formData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-            withCredentials: true,
-            onUploadProgress: (progressEvent) => {
-              const percentCompleted = Math.round(
-                (progressEvent.loaded * 100) / progressEvent.total
-              );
-              setUploadProgress(percentCompleted);
-            },
-          }
-        );
-        return response.data;
-      } catch (err) {
-        const errorMsg =
-          err.response?.data?.detail || "Failed to upload submission";
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      } finally {
-        setLoading(false);
-        setUploadProgress(0);
-      }
-    },
-    [apiUrl]
-  );
+  const uploadBatchSubmission = useCallback(async (formData) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setUploadProgress(0);
+
+      const data = await SubmissionService.uploadBatchSubmission(formData, (pct) => {
+        setUploadProgress(pct);
+      });
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+      setUploadProgress(0);
+    }
+  }, []);
 
   const getSubmissionSummary = useCallback(
-    async (testId, studentId = null) => {
+    async (testId = null, studentId = null) => {
       try {
         setLoading(true);
         setError(null);
-
-        const params = new URLSearchParams();
-        if (testId) params.append("test_id", testId);
-        if (studentId) params.append("student_id", studentId);
-
-        const response = await axios.get(
-          `${apiUrl}submissions/submission_summary/?${params.toString()}`,
-          { withCredentials: true }
-        );
-        return response.data;
+        const data = await SubmissionService.getSubmissionSummary(testId, studentId);
+        return data;
       } catch (err) {
-        const errorMsg =
-          err.response?.data?.detail || "Failed to fetch submissions";
-        setError(errorMsg);
-        throw new Error(errorMsg);
+        setError(err.message);
+        throw err;
       } finally {
         setLoading(false);
       }
     },
-    [apiUrl]
+    [],
   );
 
-  const getSubmissionDetails = useCallback(
-    async (submissionId) => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await axios.get(
-          `${apiUrl}submissions/${submissionId}/detail/`,
-          { withCredentials: true }
-        );
-        return response.data;
-      } catch (err) {
-        const errorMsg =
-          err.response?.data?.detail || "Failed to fetch submission details";
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [apiUrl]
-  );
+  const getSubmissionDetails = useCallback(async (submissionId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await SubmissionService.getSubmissionDetail(submissionId);
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const deleteSubmission = useCallback(
-    async (submissionId) => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await axios.delete(
-          `${apiUrl}submissions/${submissionId}/`,
-          { withCredentials: true }
-        );
-        return response.data;
-      } catch (err) {
-        const errorMsg =
-          err.response?.data?.detail || "Failed to delete submission";
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [apiUrl]
-  );
+  const deleteSubmission = useCallback(async (submissionId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await SubmissionService.deleteSubmission(submissionId);
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const getStudentDetails = useCallback(
-    async (name = "", className = "") => {
+    async (searchQuery = "", className = "") => {
       try {
         setLoading(true);
         setError(null);
+        const params = {};
+        if (searchQuery) params.search = searchQuery;
+        if (className) params.class = className;
 
-        const params = new URLSearchParams();
-        if (name) params.append("name", name);
-        if (className) params.append("class", className);
-
-        const response = await axios.get(
-          `${apiUrl}submissions/student_details/?${params.toString()}`,
-          { withCredentials: true }
-        );
-        return response.data;
+        const data = await SubmissionService.getStudentDetails(params);
+        return data;
       } catch (err) {
-        const errorMsg =
-          err.response?.data?.detail || "Failed to fetch student details";
-        setError(errorMsg);
-        throw new Error(errorMsg);
+        setError(err.message);
+        throw err;
       } finally {
         setLoading(false);
       }
     },
-    [apiUrl]
+    [],
   );
 
   return {
@@ -148,6 +113,7 @@ export function useSubmission() {
     uploadProgress,
     error,
     uploadSubmission,
+    uploadBatchSubmission,
     getSubmissionSummary,
     getSubmissionDetails,
     deleteSubmission,

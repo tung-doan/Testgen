@@ -54,8 +54,9 @@ export function useTest() {
       const data = await TestService.createTest(testData);
       return data;
     } catch (err) {
-      setError(err.message);
-      throw err;
+      const errorMessage = err.message || "Failed to create test";
+      setError(errorMessage);
+      throw new Error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -80,26 +81,22 @@ export function useTest() {
       setLoading(true);
       setError(null);
 
-      // Format answer keys: ensure all keys are strings and values are uppercase letters
+      // Format answer keys
       const formattedAnswerKeys = {};
       Object.keys(answerKeys).forEach((key) => {
         const value = answerKeys[key];
         if (value) {
-          // Only include non-empty values
           formattedAnswerKeys[String(key)] = String(value).toUpperCase();
         }
       });
+
       const data = await TestService.saveAnswerKeys(
         testId,
-        formattedAnswerKeys
+        formattedAnswerKeys,
       );
       return data;
     } catch (err) {
-      console.error("Save answer keys error:", err); // Debug log
-      const errorMessage =
-        err.response?.data?.error ||
-        err.message ||
-        "Failed to save answer keys";
+      const errorMessage = err.message || "Failed to save answer keys";
       setError(errorMessage);
       throw new Error(errorMessage);
     } finally {
@@ -117,7 +114,6 @@ export function useTest() {
       }
       return data || {};
     } catch (err) {
-      console.error("Get answer keys error:", err); 
       setError(err.message);
       return {};
     } finally {
@@ -125,19 +121,31 @@ export function useTest() {
     }
   }, []);
 
-  const previewTestPDF = useCallback(async (testData) => {
+  const generateFullTestPDF = useCallback(async (testData) => {
     try {
       setLoading(true);
       setError(null);
-      const blob = await TestService.previewTestPDF(testData);
-
-      const url = window.URL.createObjectURL(blob); // mở url trong tab mới
-      window.open(url, "_blank");
-
+      const blob = await TestService.generateFullTestPDF(testData);
       return blob;
     } catch (err) {
-      setError(err.message);
-      throw err;
+      const errorMessage = err.message || "Failed to generate full test PDF";
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const downloadAllVariants = useCallback(async (testId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const blob = await TestService.downloadAllVariants(testId);
+      return blob;
+    } catch (err) {
+      const errorMessage = err.message || "Failed to download variants";
+      setError(errorMessage);
+      throw new Error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -153,6 +161,7 @@ export function useTest() {
     deleteTest,
     saveAnswerKeys,
     getAnswerKeys,
-    previewTestPDF,
+    generateFullTestPDF,
+    downloadAllVariants,
   };
 }

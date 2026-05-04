@@ -193,11 +193,14 @@ class QuestionViewSet(viewsets.ModelViewSet):
             if result['success']:
                 return Response(
                     {
-                        "message": f"Successfully created {result['created_count']} questions",
+                        "message": f"Successfully created {result['created_count']} questions" + 
+                                   (f", skipped {result['skipped_count']} duplicates" if result['skipped_count'] > 0 else ""),
                         "section_id": section_id,
                         "section_name": section.name,
                         "language": result['language'],
                         "created_count": result['created_count'],
+                        "skipped_count": result.get('skipped_count', 0),
+                        "skipped_duplicates": result.get('skipped_duplicates', []),
                         "errors": result['errors']
                     }, 
                     status=status.HTTP_201_CREATED
@@ -284,4 +287,47 @@ class QuestionViewSet(viewsets.ModelViewSet):
         return Response(
             {"message": "Question deleted"},
             status=status.HTTP_204_NO_CONTENT
+        )
+    
+    @action(detail=False, methods=['post'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """Bulk soft delete nhiều câu hỏi cùng lúc"""
+        question_ids = request.data.get('question_ids', [])
+        
+        if not question_ids:
+            return Response(
+                {"error": "question_ids is required and must be a non-empty array"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not isinstance(question_ids, list):
+            return Response(
+                {"error": "question_ids must be an array"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get all questions that belong to user
+        questions = Question.objects.filter(
+            section__chapter__subject__created_by=request.user,
+            id__in=question_ids,
+            is_active=True
+        )
+        
+        deleted_count = questions.count()
+        
+        if deleted_count == 0:
+            return Response(
+                {"message": "No questions found to delete", "deleted_count": 0},
+                status=status.HTTP_200_OK
+            )
+        
+        # Soft delete
+        questions.update(is_active=False)
+        
+        return Response(
+            {
+                "message": f"Successfully deleted {deleted_count} question(s)",
+                "deleted_count": deleted_count
+            },
+            status=status.HTTP_200_OK
         )

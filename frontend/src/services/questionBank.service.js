@@ -73,6 +73,11 @@ const QuestionBankService = {
 
   deleteQuestion: (id) => apiClient.delete(`question-bank/questions/${id}/`),
 
+  bulkDeleteQuestions: (questionIds) => apiClient.post(
+    "question-bank/questions/bulk-delete/",
+    { question_ids: questionIds }
+  ),
+
   getQuestionDetails: (id) => apiClient.get(`question-bank/questions/${id}/`),
 
   duplicateQuestion: (id) =>

@@ -60,7 +60,7 @@ export default function Navbar() {
         },
         {
           label: "Paper Test",
-          href: "/quiz",
+          href: "/create-test/paper",
           icon: FileText,
           description: "Generate printable exam sheets",
         },
@@ -114,6 +114,11 @@ export default function Navbar() {
                           key={subIndex}
                           asChild
                           className="focus:bg-[#3a3938] cursor-pointer"
+                          onSelect={() => {
+                            if (pathname !== subItem.href) {
+                              window.dispatchEvent(new Event("navigation-start"));
+                            }
+                          }}
                         >
                           <Link
                             href={subItem.href}

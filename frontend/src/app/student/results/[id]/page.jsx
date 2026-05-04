@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button"; // ✅ Import Button
-import { Loader2, Award, ArrowLeft } from "lucide-react"; // ✅ Import ArrowLeft
+import { Loader2, Award, ArrowLeft } from "lucide-react";
+import ResultsLoading from "./loading";
 import { useOnlineExam } from "@/hooks/useOnlineExam";
 import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
@@ -36,11 +37,7 @@ export default function ExamResultPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-green-600" />
-      </div>
-    );
+    return <ResultsLoading />;
   }
 
   if (!result) {

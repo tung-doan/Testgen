@@ -16,6 +16,7 @@ import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { useClassroom } from "@/hooks/useClassroom";
+import { TableSkeleton } from "@/components/ui/skeletons";
 
 export default function Class() {
   const router = useRouter();
@@ -73,7 +74,7 @@ export default function Class() {
           </CardHeader>
           <CardContent className="p-6">
             {loading ? (
-              <p className="text-center text-gray-600">Loading...</p>
+              <TableSkeleton rows={5} cols={4} />
             ) : error ? (
               <p className="text-center text-red-600">{error}</p>
             ) : classes.length === 0 ? (
@@ -102,7 +103,10 @@ export default function Class() {
                     <TableRow
                       key={classroom.id}
                       className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() => router.push(`/class/${classroom.id}`)}
+                      onClick={() => {
+                        window.dispatchEvent(new Event("navigation-start"));
+                        router.push(`/class/${classroom.id}`);
+                      }}
                     >
                       <TableCell>{classroom.name}</TableCell>
                       <TableCell>{classroom.description || "N/A"}</TableCell>

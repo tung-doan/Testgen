@@ -106,18 +106,26 @@ class StudentLoginView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        student_id = request.data.get("student_id")
+        identifier = request.data.get("identifier")  # email or username
         password = request.data.get("password")
-        if not student_id or not password:
-            return Response({"detail": "student_id and password are required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not identifier or not password:
+            return Response({"detail": "Email/username and password are required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        student = Student.objects.filter(student_id=student_id).first()
-        if not student or not student.user:
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        # Try to find user by email or username
+        user = User.objects.filter(email=identifier).first()
+        if not user:
+            user = User.objects.filter(username=identifier).first()
+        
+        if not user:
+            return Response({"detail": "Username/Email does not exist"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        user = student.user
         if not user.check_password(password):
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"detail": "Incorrect password"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check if user has a student profile
+        student = Student.objects.filter(user=user).first()
+        if not student:
+            return Response({"detail": "No student profile linked to this account"}, status=status.HTTP_401_UNAUTHORIZED)
 
         refresh = RefreshToken.for_user(user)
         user_data = {
@@ -127,18 +135,24 @@ class StudentLoginView(APIView):
             "is_student": True,
         }
         
+        classrooms_data = [
+            {
+                'id': classroom.id,
+                'name': classroom.name
+            } for classroom in student.classrooms.all()
+        ]
+        
         student_data = {
             "id": student.id,
             "name": student.name,
             "student_id": student.student_id,
-            "classroom_id": student.classroom.id if student.classroom else None,
-            "classroom_name": student.classroom.name if student.classroom else None,
+            "classrooms": classrooms_data,
         }
         
         response = Response({
             "message": "Login successful",
             "user": user_data,
-            "student": student_data,  # ✅ Trả về student data riêng
+            "student": student_data,
             "access": str(refresh.access_token),
             "refresh": str(refresh)
         }, status = status.HTTP_200_OK)
@@ -309,3 +323,59 @@ class TokenLoginView(APIView):
         return response
 
         
+class StudentRegisterView(APIView):
+    """Student self-registration: creates User + Student profile"""
+    authentication_classes = []
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        from users.Serializers import StudentRegisterSerializer
+        
+        serializer = StudentRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        
+        user = result['user']
+        student = result['student']
+        
+        # Generate JWT tokens so student is logged in immediately
+        refresh = RefreshToken.for_user(user)
+        
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_student": True,
+        }
+        
+        student_data = {
+            "id": student.id,
+            "name": student.name,
+            "student_id": student.student_id,
+            "classrooms": [],
+        }
+        
+        response = Response({
+            "message": "Registration successful",
+            "user": user_data,
+            "student": student_data,
+        }, status=status.HTTP_201_CREATED)
+        
+        response.set_cookie(
+            key='access_token',
+            value=str(refresh.access_token),
+            httponly=True,
+            secure=True,
+            samesite='None',
+            path='/'
+        )
+        response.set_cookie(
+            key='refresh_token',
+            value=str(refresh),
+            httponly=True,
+            secure=True,
+            samesite='None',
+            path='/'
+        )
+        
+        return response

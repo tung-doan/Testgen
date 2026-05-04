@@ -14,7 +14,7 @@ import { Loader2 } from "lucide-react";
  * @param {number} props.delay - Thời gian delay trước khi hiển thị (ms), giúp tránh nháy với tác vụ nhanh
  */
 export default function LoadingScreen({ 
-  message = "Đang tải dữ liệu...", 
+  message = "Loading data...", 
   fullScreen = true,
   className = "",
   delay = 500 // Mặc định delay 500ms để tránh nháy màn hình với các thao tác nhanh
@@ -89,7 +89,7 @@ export function InlineLoader({ size = "small", className = "" }) {
  * @param {Object} props
  * @param {string} props.text - Text hiển thị bên cạnh spinner
  */
-export function ButtonLoader({ text = "Đang xử lý..." }) {
+export function ButtonLoader({ text = "Processing..." }) {
   return (
     <>
       <Loader2 className="mr-2 h-4 w-4 animate-spin" />

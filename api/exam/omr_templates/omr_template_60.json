@@ -1,0 +1,333 @@
+{
+  "version": "2.0",
+  "name": "testgen_omr_v2",
+  "description": "Grid-based OMR template. All coordinates in pixels relative to TL marker center after warp to target size.",
+  "target_warp_size": {
+    "width": 800,
+    "height": 1000
+  },
+  "timing_marks": {
+    "side": "left",
+    "mark_width_px": 10.64,
+    "mark_height_px": 7.27,
+    "positions": [
+      {
+        "section": "header",
+        "row": 0,
+        "x": 17.02,
+        "y": 170.91
+      },
+      {
+        "section": "header",
+        "row": 1,
+        "x": 17.02,
+        "y": 190.91
+      },
+      {
+        "section": "header",
+        "row": 2,
+        "x": 17.02,
+        "y": 210.91
+      },
+      {
+        "section": "header",
+        "row": 3,
+        "x": 17.02,
+        "y": 230.91
+      },
+      {
+        "section": "header",
+        "row": 4,
+        "x": 17.02,
+        "y": 250.91
+      },
+      {
+        "section": "header",
+        "row": 5,
+        "x": 17.02,
+        "y": 270.91
+      },
+      {
+        "section": "header",
+        "row": 6,
+        "x": 17.02,
+        "y": 290.91
+      },
+      {
+        "section": "header",
+        "row": 7,
+        "x": 17.02,
+        "y": 310.91
+      },
+      {
+        "section": "header",
+        "row": 8,
+        "x": 17.02,
+        "y": 330.91
+      },
+      {
+        "section": "header",
+        "row": 9,
+        "x": 17.02,
+        "y": 350.91
+      },
+      {
+        "section": "answers",
+        "row": 0,
+        "x": 17.02,
+        "y": 414.55
+      },
+      {
+        "section": "answers",
+        "row": 1,
+        "x": 17.02,
+        "y": 434.55
+      },
+      {
+        "section": "answers",
+        "row": 2,
+        "x": 17.02,
+        "y": 454.55
+      },
+      {
+        "section": "answers",
+        "row": 3,
+        "x": 17.02,
+        "y": 474.55
+      },
+      {
+        "section": "answers",
+        "row": 4,
+        "x": 17.02,
+        "y": 494.55
+      },
+      {
+        "section": "answers",
+        "row": 5,
+        "x": 17.02,
+        "y": 523.64
+      },
+      {
+        "section": "answers",
+        "row": 6,
+        "x": 17.02,
+        "y": 543.64
+      },
+      {
+        "section": "answers",
+        "row": 7,
+        "x": 17.02,
+        "y": 563.64
+      },
+      {
+        "section": "answers",
+        "row": 8,
+        "x": 17.02,
+        "y": 583.64
+      },
+      {
+        "section": "answers",
+        "row": 9,
+        "x": 17.02,
+        "y": 603.64
+      },
+      {
+        "section": "answers",
+        "row": 10,
+        "x": 17.02,
+        "y": 632.73
+      },
+      {
+        "section": "answers",
+        "row": 11,
+        "x": 17.02,
+        "y": 652.73
+      },
+      {
+        "section": "answers",
+        "row": 12,
+        "x": 17.02,
+        "y": 672.73
+      },
+      {
+        "section": "answers",
+        "row": 13,
+        "x": 17.02,
+        "y": 692.73
+      },
+      {
+        "section": "answers",
+        "row": 14,
+        "x": 17.02,
+        "y": 712.73
+      },
+      {
+        "section": "answers",
+        "row": 15,
+        "x": 17.02,
+        "y": 741.82
+      },
+      {
+        "section": "answers",
+        "row": 16,
+        "x": 17.02,
+        "y": 761.82
+      },
+      {
+        "section": "answers",
+        "row": 17,
+        "x": 17.02,
+        "y": 781.82
+      },
+      {
+        "section": "answers",
+        "row": 18,
+        "x": 17.02,
+        "y": 801.82
+      },
+      {
+        "section": "answers",
+        "row": 19,
+        "x": 17.02,
+        "y": 821.82
+      }
+    ]
+  },
+  "blocks": {
+    "student_id": {
+      "type": "digit_grid",
+      "label": "STUDENT ID",
+      "origin": {
+        "x": 52.13,
+        "y": 170.91
+      },
+      "cols": 8,
+      "rows": 10,
+      "gap_x": 27.66,
+      "gap_y": 20.0,
+      "header_row": true,
+      "digit_values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "thresholds": {
+        "fill_ratio": 1.5
+      }
+    },
+    "test_id": {
+      "type": "digit_grid",
+      "label": "TEST ID",
+      "origin": {
+        "x": 324.47,
+        "y": 170.91
+      },
+      "cols": 3,
+      "rows": 10,
+      "gap_x": 27.66,
+      "gap_y": 20.0,
+      "header_row": true,
+      "digit_values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "thresholds": {
+        "fill_ratio": 1.5
+      }
+    },
+    "answers_col_1": {
+      "type": "answer_grid",
+      "label": "Questions 1-20",
+      "origin": {
+        "x": 81.91,
+        "y": 414.55
+      },
+      "cols": 4,
+      "rows": 20,
+      "gap_x": 27.66,
+      "gap_y": 20.0,
+      "block_size": 5,
+      "block_gap_y": 9.09,
+      "choice_labels": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "question_start": 1,
+      "thresholds": {
+        "min_fill_pixels": 80,
+        "fill_ratio": 1.5
+      }
+    },
+    "answers_col_2": {
+      "type": "answer_grid",
+      "label": "Questions 21-40",
+      "origin": {
+        "x": 226.6,
+        "y": 414.55
+      },
+      "cols": 4,
+      "rows": 20,
+      "gap_x": 27.66,
+      "gap_y": 20.0,
+      "block_size": 5,
+      "block_gap_y": 9.09,
+      "choice_labels": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "question_start": 21,
+      "thresholds": {
+        "min_fill_pixels": 80,
+        "fill_ratio": 1.5
+      }
+    },
+    "answers_col_3": {
+      "type": "answer_grid",
+      "label": "Questions 41-60",
+      "origin": {
+        "x": 371.28,
+        "y": 414.55
+      },
+      "cols": 4,
+      "rows": 20,
+      "gap_x": 27.66,
+      "gap_y": 20.0,
+      "block_size": 5,
+      "block_gap_y": 9.09,
+      "choice_labels": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "question_start": 41,
+      "thresholds": {
+        "min_fill_pixels": 80,
+        "fill_ratio": 1.5
+      }
+    }
+  },
+  "bubble_radius_px": 9.36,
+  "global_thresholds": {
+    "relative_fill_ratio": 1.5
+  }
+}

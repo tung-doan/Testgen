@@ -1,86 +1,108 @@
-import apiClient from './api-client';
+import apiClient from "./api-client";
 
 const TestService = {
+  // ============ Paper Tests ============
   getAllTests: async () => {
     try {
-      const response = await apiClient.get('tests/');
+      const response = await apiClient.get("exam/tests/");
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to fetch tests');
+      throw new Error(error.response?.data?.error || "Failed to fetch tests");
     }
   },
 
-  getTestSummary: async () => {
+  getTestById: async (id, config = {}) => {
     try {
-      const response = await apiClient.get('tests/test_summary/');
+      const response = await apiClient.get(`exam/tests/${id}/`, config);
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to fetch test summary');
+      throw new Error(error.response?.data?.error || "Failed to fetch test");
     }
   },
 
-  getTestById: async (testId) => {
+  createTest: async (data) => {
     try {
-      const response = await apiClient.get(`tests/${testId}/`);
+      const response = await apiClient.post("exam/tests/", data);
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to fetch test details');
+      throw new Error(error.response?.data?.error || "Failed to create test");
     }
   },
 
-  createTest: async (testData) => {
+  updateTest: async (id, data) => {
     try {
-      const response = await apiClient.post('tests/', testData);
+      const response = await apiClient.put(`exam/tests/${id}/`, data);
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to create test');
+      throw new Error(error.response?.data?.error || "Failed to update test");
     }
   },
 
   deleteTest: async (testId) => {
     try {
-      const response = await apiClient.delete(`tests/${testId}/`);
+      const response = await apiClient.delete(`exam/tests/${testId}/`);
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to delete test');
+      throw new Error(error.response?.data?.error || "Failed to delete test");
     }
   },
 
-  saveAnswerKeys: async (testId, answerKeys) => {
+  getTestSummary: async () => {
     try {
-      const response = await apiClient.post(
-        `tests/${testId}/save_answer_keys/`,
-        { answer_keys: answerKeys }
-      );
+      const response = await apiClient.get("exam/tests/test_summary/");
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to save answer keys');
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch test summary",
+      );
     }
   },
 
   getAnswerKeys: async (testId) => {
     try {
-      const response = await apiClient.get(`tests/${testId}/get_answer_keys/`);
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to fetch answer keys');
-    }
-  },
-
-  previewTestPDF: async (testData) => {
-    try {
-      const response = await apiClient.post(
-        'tests/preview_test_pdf/',
-        testData,
-        {
-          responseType: 'blob',
-        }
+      const response = await apiClient.get(
+        `exam/tests/${testId}/get_answer_keys/`,
       );
       return response.data;
     } catch (error) {
-      throw new Error('Failed to generate PDF preview');
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch answer keys",
+      );
     }
   },
+
+  // ============ PDF Generation ============
+  generateFullTestPDF: async (data) => {
+    try {
+      const response = await apiClient.post(
+        "exam/tests/generate_full_test_pdf/",
+        data,
+        {
+          responseType: "blob",
+        },
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || "Failed to generate PDF");
+    }
+  },
+
+  downloadAllVariants: async (testId) => {
+    try {
+      const response = await apiClient.get(
+        `exam/tests/${testId}/download-all-variants/`,
+        {
+          responseType: "blob",
+        },
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to download variants",
+      );
+    }
+  },
+
 };
 
 export default TestService;

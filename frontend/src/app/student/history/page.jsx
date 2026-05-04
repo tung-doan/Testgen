@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import LoadingScreen from "@/app/loading";
+import HistoryLoading from "./loading";
 import { useOnlineExam } from "@/hooks/useOnlineExam";
 import {
   Table,
@@ -74,7 +74,7 @@ export default function StudentHistory() {
     // Search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter((exam) =>
-        exam.exam_title.toLowerCase().includes(searchQuery.toLowerCase())
+        exam.exam_title.toLowerCase().includes(searchQuery.toLowerCase()),
       );
     }
 
@@ -112,7 +112,7 @@ export default function StudentHistory() {
     const scores = completedExams.map((exam) => exam.final_score || 0);
     const total = completedExams.length;
     const avg = (scores.reduce((sum, score) => sum + score, 0) / total).toFixed(
-      2
+      2,
     );
     const highest = Math.max(...scores).toFixed(2);
     const lowest = Math.min(...scores).toFixed(2);
@@ -128,7 +128,7 @@ export default function StudentHistory() {
   const stats = calculateStats();
 
   if (loading) {
-    return <LoadingScreen message="Loading history..." />;
+    return <HistoryLoading />;
   }
 
   return (
@@ -319,7 +319,7 @@ export default function StudentHistory() {
                                     year: "numeric",
                                     month: "short",
                                     day: "numeric",
-                                  }
+                                  },
                                 )}
                               </span>
                             </div>
@@ -331,7 +331,7 @@ export default function StudentHistory() {
                                 {Math.round(
                                   (new Date(exam.end_time) -
                                     new Date(exam.start_time)) /
-                                    60000
+                                    60000,
                                 )}{" "}
                                 min
                               </span>
@@ -340,7 +340,7 @@ export default function StudentHistory() {
                           <TableCell className="text-center">
                             <Badge
                               className={`${getScoreBadgeClass(
-                                exam.final_score
+                                exam.final_score,
                               )} font-semibold text-base px-3 py-1`}
                             >
                               {exam.final_score?.toFixed(2)} / 10

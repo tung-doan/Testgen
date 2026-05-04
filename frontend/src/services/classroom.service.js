@@ -139,6 +139,91 @@ const ClassroomService = {
       );
     }
   },
+
+  // ============================================
+  // Enrollment Request APIs
+  // ============================================
+
+  /** Browse all available classrooms (for students) */
+  getAllAvailableClassrooms: async () => {
+    try {
+      const response = await apiClient.get("classroom/all/");
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch available classrooms"
+      );
+    }
+  },
+
+  /** Student requests to join a classroom */
+  requestEnrollment: async (classroomId) => {
+    try {
+      const response = await apiClient.post("classroom/enrollment-requests/", {
+        classroom_id: classroomId,
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to send enrollment request"
+      );
+    }
+  },
+
+  /** Teacher gets pending enrollment requests for a classroom */
+  getEnrollmentRequests: async (classroomId, status = "pending") => {
+    try {
+      const response = await apiClient.get(
+        `classroom/${classroomId}/enrollment-requests/?status=${status}`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch enrollment requests"
+      );
+    }
+  },
+
+  /** Get count of pending enrollment requests */
+  getEnrollmentRequestsCount: async (classroomId) => {
+    try {
+      const response = await apiClient.get(
+        `classroom/${classroomId}/enrollment-requests/count/`
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch request count"
+      );
+    }
+  },
+
+  /** Teacher approves or rejects an enrollment request */
+  handleEnrollmentRequest: async (requestId, action) => {
+    try {
+      const response = await apiClient.patch(
+        `classroom/enrollment-requests/${requestId}/action/`,
+        { action }
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to handle enrollment request"
+      );
+    }
+  },
+
+  /** Get student's enrolled classrooms */
+  getMyEnrolledClassrooms: async () => {
+    try {
+      const response = await apiClient.get("classroom/my-classes/");
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to fetch enrolled classrooms"
+      );
+    }
+  },
 };
 
 export default ClassroomService;

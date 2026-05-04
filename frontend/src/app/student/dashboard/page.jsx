@@ -6,7 +6,7 @@ import Navbar from "@/components/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import LoadingScreen from "@/app/loading";
+import DashboardLoading from "./loading";
 import { useOnlineExam } from "@/hooks/useOnlineExam";
 import {
   BookOpen,
@@ -42,7 +42,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
 );
 
 export default function StudentDashboard() {
@@ -92,7 +92,7 @@ export default function StudentDashboard() {
           ? (
               completed.reduce(
                 (sum, exam) => sum + (exam.final_score || 0),
-                0
+                0,
               ) / completed.length
             ).toFixed(2)
           : 0;
@@ -130,14 +130,14 @@ export default function StudentDashboard() {
 
     // Sort by end_time
     const sortedExams = [...completedExams].sort(
-      (a, b) => new Date(a.end_time) - new Date(b.end_time)
+      (a, b) => new Date(a.end_time) - new Date(b.end_time),
     );
 
     const labels = sortedExams.map((exam) =>
       new Date(exam.end_time).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
-      })
+      }),
     );
 
     const scores = sortedExams.map((exam) => exam.final_score || 0);
@@ -197,7 +197,7 @@ export default function StudentDashboard() {
   };
 
   if (loading) {
-    return <LoadingScreen message="Loading dashboard..." />;
+    return <DashboardLoading />;
   }
 
   return (

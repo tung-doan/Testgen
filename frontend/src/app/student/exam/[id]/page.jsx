@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import LoadingScreen from "@/app/loading";
+import ExamLoading from "./loading";
 import { useOnlineExam } from "@/hooks/useOnlineExam";
 import QuestionInput from "@/components/exam/QuestionInput";
 import QuestionNavigator from "@/components/exam/QuestionNavigator";
@@ -147,13 +147,15 @@ export default function TakeExam({ params }) {
 
   const handleSubmitExam = async () => {
     try {
+      window.dispatchEvent(new Event("navigation-start"));
       const formattedAnswers = Object.values(answers).filter(
-        (answer) => answer !== null
+        (answer) => answer !== null,
       );
 
       await submitExam(id, formattedAnswers);
       router.push(`/student/results/${id}`);
     } catch (err) {
+      window.dispatchEvent(new Event("navigation-end"));
       console.error("Error submitting exam:", err);
       alert(`Failed to submit exam: ${err.message}`);
     }
@@ -190,7 +192,9 @@ export default function TakeExam({ params }) {
     // 2. Fill in the Blank (Dạng nhiều ô) hoặc True/False
     if (Array.isArray(data.answers)) {
       // Chỉ cần điền ít nhất 1 ô là tính đã làm
-      return data.answers.some((a) => a !== null && a !== "" && a !== undefined);
+      return data.answers.some(
+        (a) => a !== null && a !== "" && a !== undefined,
+      );
     }
 
     // 3. Multiple Choice (Mảng ID)
@@ -214,8 +218,16 @@ export default function TakeExam({ params }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  if (loading || !attemptData) {
-    return <LoadingScreen message="Loading exam..." />;
+  useEffect(() => {
+    if (!attemptData) {
+      window.dispatchEvent(new Event("navigation-start"));
+    } else {
+      window.dispatchEvent(new Event("navigation-end"));
+    }
+  }, [attemptData]);
+
+  if (!attemptData) {
+    return <ExamLoading />;
   }
 
   // Time's Up View
@@ -480,9 +492,8 @@ export default function TakeExam({ params }) {
               {loading ? (
                 <>
                   {" "}
-                  <span className="animate-spin mr-2">
-                    ⏳
-                  </span> Submitting...{" "}
+                  <span className="animate-spin mr-2">⏳</span>{" "}
+                  Submitting...{" "}
                 </>
               ) : (
                 <>

@@ -4,8 +4,12 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import serializers
-from .models import Classroom, Student
-from .serializers import ClassroomSerializer, ClassroomCreateSerializer, StudentSerializer
+from django.db import IntegrityError
+from .models import Classroom, Student, EnrollmentRequest
+from .serializers import (
+    ClassroomSerializer, ClassroomCreateSerializer, StudentSerializer,
+    AllClassroomSerializer, EnrollmentRequestSerializer, EnrollmentRequestActionSerializer
+)
 from exam.models import PaperSubmission
 from django.shortcuts import get_object_or_404
 
@@ -33,11 +37,9 @@ class ClassroomViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def students(self, request, pk=None):
         classroom = self.get_object()
-        # Lấy danh sách sinh viên thuộc lớp
-        students = Student.objects.filter(classroom=classroom)
+        students = Student.objects.filter(classrooms=classroom).prefetch_related('classrooms')
         students_data = []
 
-        # Lấy bài nộp của từng sinh viên
         for student in students:
             submission = PaperSubmission.objects.filter(student=student).first()
             if submission:
@@ -59,7 +61,6 @@ def get_student_classroom_info(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Validate integer
         try:
             student_pk = int(student_pk)
         except (ValueError, TypeError):
@@ -69,55 +70,53 @@ def get_student_classroom_info(request):
             )
 
         try:
-            requesting_student = Student.objects.select_related('classroom__teacher', 'user').get(id=student_pk)
+            requesting_student = Student.objects.prefetch_related(
+                'classrooms__teacher'
+            ).select_related('user').get(id=student_pk)
         except Student.DoesNotExist:
             return Response(
                 {'error': f'Student with id {student_pk} not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        classroom = requesting_student.classroom
-        if not classroom:
-            return Response(
-                {'error': 'Student is not assigned to any classroom'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
 
-        classmates = Student.objects.filter(classroom=classroom).select_related('user').order_by('name')
-        
-        classmates_data = []
-        for student in classmates:
-            date_of_birth = None
-            if student.user and hasattr(student.user, 'date_of_birth'):
-                date_of_birth = student.user.date_of_birth
+        all_classmates = Student.objects.filter(
+            classrooms__in=requesting_student.classrooms.all()
+        ).select_related('user').distinct().order_by('name')
+
+        classrooms_data = []
+        for classroom in requesting_student.classrooms.all():
+            teacher_info = None
+            if classroom.teacher:
+                teacher_info = {
+                    'name': classroom.teacher.username,
+                    'email': classroom.teacher.email or 'N/A',
+                }
             
-            classmates_data.append({
-                'id': student.id,
-                'name': student.name,
-                'student_id': student.student_id,
-                'date_of_birth': date_of_birth,  
-                'average_score': student.average_score,
+            classrooms_data.append({
+                'id': classroom.id,
+                'name': classroom.name,
+                'description': classroom.description,
+                'teacher': teacher_info,
+                'total_students': classroom.students.count(),
             })
-        
-        # Get teacher info
-        teacher_info = None
-        if classroom.teacher:
-            teacher_info = {
-                'name': classroom.teacher.username,
-                'email': classroom.teacher.email or 'N/A',
-            }
-        
-        enrollment_date = requesting_student.created_at
+
+        classmates_data = [{
+            'id': classmate.id,
+            'name': classmate.name,
+            'student_id': classmate.student_id,
+            'date_of_birth': classmate.user.date_of_birth if classmate.user else None,
+            'average_score': classmate.average_score,
+            'is_current_user': classmate.id == requesting_student.id
+        } for classmate in all_classmates]
         
         return Response({
-            'id': classroom.id,
-            'name': classroom.name,
-            'description': classroom.description,
-            'teacher': teacher_info,
-            'total_students': classmates.count(),
-            'classmates': classmates_data,
-            'enrollment_date': enrollment_date,
-            'created_at': classroom.created_at,
+            'student': {
+                'id': requesting_student.id,
+                'name': requesting_student.name,
+                'student_id': requesting_student.student_id,
+            },
+            'classrooms': classrooms_data,
+            'classmates': classmates_data
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -132,8 +131,8 @@ class StudentViewSet(viewsets.ModelViewSet):
     serializer_class = StudentSerializer
 
     def get_queryset(self):
-        return Student.objects.filter(classroom__teacher=self.request.user)
-
+        return Student.objects.filter(classrooms__teacher=self.request.user).distinct()
+    
     def perform_create(self, serializer):
         classroom_id = self.request.data.get('classroom')
         if not classroom_id:
@@ -143,7 +142,6 @@ class StudentViewSet(viewsets.ModelViewSet):
         if classroom.teacher != self.request.user:
             raise serializers.ValidationError({"classroom": "You are not authorized to add students to this class."})
         
-        # Kiểm tra dữ liệu đầu vào
         name = self.request.data.get('name')
         student_id = self.request.data.get('student_id')
         password = self.request.data.get('password')
@@ -158,21 +156,332 @@ class StudentViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({
                 "password": "Password is required when creating a student."
             })
-        
+            
         if len(password) < 6:
             raise serializers.ValidationError({
                 "password": "Password must be at least 6 characters long."
             })
         
-        serializer.save(classroom=classroom)
+        student = serializer.save()
+        student.classrooms.add(classroom)
         
-        def destroy(self, request, *args, **kwargs):
-            instance = self.get_object()
-            classroom = instance.classroom
-            if classroom.teacher != self.request.user:
-                return Response({"error": "You are not authorized to delete this student."}, status=status.HTTP_403_FORBIDDEN)
+        # Create user account
+        date_of_birth = self.request.data.get('date_of_birth')
+        student.create_user_account(raw_password=password, date_of_birth=date_of_birth)
+    
+    @action(detail=True, methods=['post'], url_path='add-to-classroom')
+    def add_to_classroom(self, request, pk=None):
+        student = self.get_object()
+        classroom_id = request.data.get('classroom_id')
+        
+        classroom = get_object_or_404(Classroom, id=classroom_id)
+        if classroom.teacher != request.user:
+            return Response(
+                {"error": "You don't have permission to add students to this classroom"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        student.classrooms.add(classroom)
+        return Response({"message": "Student added to classroom successfully"})
+    
+    @action(detail=True, methods=['post'], url_path='remove-from-classroom')
+    def remove_from_classroom(self, request, pk=None):
+        student = self.get_object()
+        classroom_id = request.data.get('classroom_id')
+        
+        classroom = get_object_or_404(Classroom, id=classroom_id)
+        if classroom.teacher != request.user:
+            return Response(
+                {"error": "You don't have permission"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        student.classrooms.remove(classroom)
+
+        # Cleanup enrollment request row to allow future re-join requests
+        EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
+        
+        # Nếu không còn lớp nào, có thể xóa student
+        if not student.classrooms.exists():
+            student.delete()
             
-            # Xóa các bài nộp liên quan trước khi xóa sinh viên
-            PaperSubmission.objects.filter(student=instance).delete()
-            self.perform_destroy(instance)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['post'], url_path='remove-from-classroom-self')
+    def remove_from_classroom_self(self, request):
+        """Student can remove themselves from a classroom."""
+        classroom_id = request.data.get('classroom_id')
+
+        if not classroom_id:
+            return Response(
+                {'error': 'classroom_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        student = Student.objects.filter(user=request.user).first()
+        if not student:
+            return Response(
+                {'error': 'Student profile not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        classroom = get_object_or_404(Classroom, id=classroom_id)
+        if classroom not in student.classrooms.all():
+            return Response(
+                {'error': 'You are not enrolled in this classroom'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        student.classrooms.remove(classroom)
+
+        # Cleanup enrollment request row to allow future re-join requests
+        EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
+
+        return Response(
+            {'message': f'You have left classroom {classroom.name} successfully.'},
+            status=status.HTTP_200_OK
+        )
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        classroom = instance.classrooms.first()
+        if classroom and classroom.teacher != self.request.user:
+            return Response(
+                {"error": "You are not authorized to delete this student."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        PaperSubmission.objects.filter(student=instance).delete()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ============================================
+# Enrollment Request Views
+# ============================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def all_classrooms_list(request):
+    """List all classrooms for students to browse"""
+    classrooms = Classroom.objects.select_related('teacher').all()
+    
+    # Get student info to annotate enrollment status
+    student = Student.objects.filter(user=request.user).first()
+    
+    serializer = AllClassroomSerializer(classrooms, many=True)
+    data = serializer.data
+    
+    if student:
+        enrolled_ids = set(student.classrooms.values_list('id', flat=True))
+        pending_ids = set(
+            EnrollmentRequest.objects.filter(
+                student=student, status='pending'
+            ).values_list('classroom_id', flat=True)
+        )
+        rejected_ids = set(
+            EnrollmentRequest.objects.filter(
+                student=student, status='rejected'
+            ).values_list('classroom_id', flat=True)
+        )
+        
+        for item in data:
+            cid = item['id']
+            if cid in enrolled_ids:
+                item['enrollment_status'] = 'joined'
+            elif cid in pending_ids:
+                item['enrollment_status'] = 'pending'
+            elif cid in rejected_ids:
+                item['enrollment_status'] = 'rejected'
+            else:
+                item['enrollment_status'] = None
+    else:
+        for item in data:
+            item['enrollment_status'] = None
+    
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_enrollment_request(request):
+    """Student requests to join a classroom"""
+    classroom_id = request.data.get('classroom_id')
+    
+    if not classroom_id:
+        return Response(
+            {'error': 'classroom_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    student = Student.objects.filter(user=request.user).first()
+    if not student:
+        return Response(
+            {'error': 'Student profile not found. Please register as a student first.'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    classroom = get_object_or_404(Classroom, id=classroom_id)
+    
+    # Check if already a member
+    if classroom in student.classrooms.all():
+        return Response(
+            {'error': 'You are already a member of this classroom.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check for existing pending request
+    existing = EnrollmentRequest.objects.filter(
+        student=student, classroom=classroom
+    ).first()
+    
+    if existing:
+        if existing.status == 'pending':
+            return Response(
+                {'error': 'You already have a pending request for this classroom.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        elif existing.status in ['rejected', 'approved']:
+            # Allow re-request after rejection or after leaving a previously approved class
+            existing.status = 'pending'
+            existing.save()
+            serializer = EnrollmentRequestSerializer(existing)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+    try:
+        enrollment_request = EnrollmentRequest.objects.create(
+            student=student,
+            classroom=classroom,
+            status='pending'
+        )
+    except IntegrityError:
+        # Safety net for race conditions / stale unique row
+        existing = EnrollmentRequest.objects.filter(
+            student=student,
+            classroom=classroom
+        ).first()
+        if existing:
+            if existing.status != 'pending':
+                existing.status = 'pending'
+                existing.save(update_fields=['status', 'updated_at'])
+            serializer = EnrollmentRequestSerializer(existing)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        raise
+    
+    serializer = EnrollmentRequestSerializer(enrollment_request)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_enrollment_requests(request, classroom_id):
+    """Teacher gets pending enrollment requests for their classroom"""
+    classroom = get_object_or_404(Classroom, id=classroom_id)
+    
+    if classroom.teacher != request.user:
+        return Response(
+            {'error': 'You are not authorized to view requests for this classroom.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    status_filter = request.query_params.get('status', 'pending')
+    requests_qs = EnrollmentRequest.objects.filter(
+        classroom=classroom, status=status_filter
+    ).select_related('student', 'student__user')
+    
+    serializer = EnrollmentRequestSerializer(requests_qs, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def handle_enrollment_request(request, request_id):
+    """Teacher approves or rejects an enrollment request"""
+    enrollment_request = get_object_or_404(EnrollmentRequest, id=request_id)
+    classroom = enrollment_request.classroom
+    
+    if classroom.teacher != request.user:
+        return Response(
+            {'error': 'You are not authorized to handle this request.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    action_serializer = EnrollmentRequestActionSerializer(data=request.data)
+    action_serializer.is_valid(raise_exception=True)
+    
+    action = action_serializer.validated_data['action']
+    
+    if action == 'approve':
+        enrollment_request.status = 'approved'
+        enrollment_request.save()
+        # Add student to classroom
+        enrollment_request.student.classrooms.add(classroom)
+        return Response({
+            'message': f'Student {enrollment_request.student.name} has been approved.',
+            'status': 'approved'
+        }, status=status.HTTP_200_OK)
+    
+    elif action == 'reject':
+        enrollment_request.status = 'rejected'
+        enrollment_request.save()
+        return Response({
+            'message': f'Student {enrollment_request.student.name} has been rejected.',
+            'status': 'rejected'
+        }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_enrolled_classrooms(request):
+    """Get classrooms the current student is enrolled in"""
+    student = Student.objects.filter(user=request.user).first()
+    if not student:
+        return Response(
+            {'error': 'Student profile not found.', 'classrooms': []},
+            status=status.HTTP_200_OK
+        )
+    
+    classrooms = student.classrooms.select_related('teacher').all()
+    data = []
+    for classroom in classrooms:
+        teacher_info = None
+        if classroom.teacher:
+            teacher_info = {
+                'name': classroom.teacher.username,
+                'email': classroom.teacher.email or 'N/A',
+            }
+        data.append({
+            'id': classroom.id,
+            'name': classroom.name,
+            'description': classroom.description,
+            'teacher': teacher_info,
+            'total_students': classroom.students.count(),
+        })
+    
+    return Response({
+        'student': {
+            'id': student.id,
+            'name': student.name,
+            'student_id': student.student_id,
+        },
+        'classrooms': data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_enrollment_requests_count(request, classroom_id):
+    """Get count of pending enrollment requests for a classroom"""
+    classroom = get_object_or_404(Classroom, id=classroom_id)
+    
+    if classroom.teacher != request.user:
+        return Response(
+            {'error': 'Forbidden'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    count = EnrollmentRequest.objects.filter(
+        classroom=classroom, status='pending'
+    ).count()
+    
+    return Response({'count': count}, status=status.HTTP_200_OK)

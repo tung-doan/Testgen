@@ -6,14 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Header from "@/components/Header";
-import LoadingScreen from "@/app/loading.jsx";
 import { useAuth } from "@/hooks/useAuth"; // ✅ Use useAuth hook
-import { GraduationCap, Lock, IdCard, ArrowLeft } from "lucide-react";
+import { GraduationCap, Lock, Mail, ArrowLeft } from "lucide-react";
 
 export default function StudentLogin() {
   const router = useRouter();
   const { login, actionLoading, authError } = useAuth(); // ✅ Get login from useAuth
-  const [studentId, setStudentId] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState("");
 
@@ -22,25 +21,25 @@ export default function StudentLogin() {
     setFormError("");
 
     try {
-      // ✅ Use unified login function with isStudentLogin flag
+      // Use unified login function with isStudentLogin flag
       await login(
-        { studentId, password },
+        { identifier, password },
         true // isStudentLogin = true
       );
 
       console.log("Student login successful");
 
+      // Trigger progress bar trước khi chuyển trang
+      window.dispatchEvent(new Event("navigation-start"));
       // Redirect to student dashboard
       router.push("/student/dashboard");
     } catch (err) {
-      console.error("Student login failed:", err);
-      setFormError(err.message || "Invalid Student ID or password");
+      setFormError(err.message || "Invalid email/username or password");
     }
   };
 
   return (
     <>
-      {actionLoading && <LoadingScreen message="Logging in..." />}
       <Header />
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
         <Card className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-white border-0 hover:shadow-3xl transition-all duration-300">
@@ -90,24 +89,24 @@ export default function StudentLogin() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Student ID Field */}
+              {/* Email or Username Field */}
               <div className="space-y-2">
                 <label
-                  htmlFor="studentId"
+                  htmlFor="identifier"
                   className="block text-sm font-semibold text-gray-700"
                 >
-                  Student ID (MSSV)
+                  Email or Username
                 </label>
                 <div className="relative">
-                  <IdCard className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                   <Input
-                    id="studentId"
+                    id="identifier"
                     type="text"
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
                     disabled={actionLoading}
                     className="pl-10 h-12 border-gray-300 focus:border-blue-500 focus:ring-blue-500 rounded-lg"
-                    placeholder="Enter your Student ID"
+                    placeholder="Enter your email or username"
                   />
                 </div>
               </div>
@@ -171,6 +170,19 @@ export default function StudentLogin() {
               <p className="text-sm text-blue-800">
                 <strong>Note:</strong> If you don't know your password, please
                 contact your teacher to get your login credentials.
+              </p>
+            </div>
+
+            {/* Register Link */}
+            <div className="text-center mt-4">
+              <p className="text-sm text-gray-600">
+                Don't have an account?{" "}
+                <Link
+                  href="/student/register"
+                  className="text-blue-600 hover:text-blue-700 font-semibold hover:underline"
+                >
+                  Register here
+                </Link>
               </p>
             </div>
           </CardContent>

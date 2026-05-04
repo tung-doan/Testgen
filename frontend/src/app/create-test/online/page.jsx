@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
-import LoadingScreen from "@/app/loading";
+import CreateOnlineTestLoading from "./loading";
 import { useQuestionBank } from "@/hooks/useQuestionBank";
 import { useClassroom } from "@/hooks/useClassroom";
 import {
@@ -354,7 +354,7 @@ export default function CreateOnlineTest() {
   };
 
   if (loading && !subjects.length) {
-    return <LoadingScreen message="Loading..." />;
+    return <CreateOnlineTestLoading />;
   }
 
   return (
@@ -366,7 +366,7 @@ export default function CreateOnlineTest() {
           {/* Header */}
           <Card className="border-0 shadow-xl overflow-hidden mb-4 !p-0">
             <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-0 m-0">
-              <div className="flex items-center justify-between px-6 py-5">
+              <div className="flex items-center justify-between px-4 py-4">
                 <div className="flex items-center gap-4">
                   <div className="bg-white/20 p-3 rounded-lg">
                     <Monitor className="h-8 w-8" />
@@ -382,7 +382,10 @@ export default function CreateOnlineTest() {
                   </div>
                 </div>
                 <Button
-                  onClick={() => router.push("/online-tests")}
+                  onClick={() => {
+                    window.dispatchEvent(new Event("navigation-start"));
+                    router.push("/online-tests");
+                  }}
                   className="bg-white text-blue-700 hover:cursor-pointer hover:bg-blue-50 flex items-center gap-2"
                 >
                   <BookOpen className="h-5 w-5" />
@@ -404,7 +407,6 @@ export default function CreateOnlineTest() {
             <Card className="border-0 shadow-lg lg:col-span-1 !p-0">
               <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-lg">
                 <CardTitle className="flex items-center  gap-2 p-3">
-                  <BookOpen className="h-5 w-5 text-blue-600" />
                   Test Configuration
                 </CardTitle>
               </CardHeader>
@@ -563,7 +565,6 @@ export default function CreateOnlineTest() {
             <Card className="border-0 shadow-lg lg:col-span-2 !p-0">
               <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-t-lg">
                 <CardTitle className="flex items-center gap-2 p-3">
-                  <BookOpen className="h-5 w-5 text-indigo-600" />
                   Select Questions from Bank
                 </CardTitle>
               </CardHeader>

@@ -78,7 +78,7 @@ class QuestionDetailSerializer(serializers.ModelSerializer):
     chapter_name = serializers.CharField(source='section.chapter.name', read_only=True)
     subject_name = serializers.CharField(source='section.chapter.subject.name', read_only=True)
     question_type_display = serializers.CharField(source='get_question_type_display', read_only=True)
-    
+    has_multiple_correct_answers = serializers.SerializerMethodField()
     class Meta:
         model = Question
         fields = [
@@ -86,9 +86,16 @@ class QuestionDetailSerializer(serializers.ModelSerializer):
             'correct_answer_text',
             'section', 'section_name', 'chapter_name', 'subject_name',
             'created_by', 'created_at', 'updated_at', 'is_active',
-            'options'
+            'options', 'has_multiple_correct_answers'
         ]
 
+    def get_has_multiple_correct_answers(self, obj):
+        """Kiểm tra xem câu hỏi MC có nhiều đáp án đúng không"""
+        if obj.question_type != 'MC':
+            return False
+        
+        correct_count = obj.options.filter(is_correct_bool=True).count()
+        return correct_count > 1
 class QuestionCreateSerializer(serializers.ModelSerializer):
     options = AnswerOptionSerializer(many=True, required=False)
     

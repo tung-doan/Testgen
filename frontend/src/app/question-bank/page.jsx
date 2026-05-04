@@ -24,7 +24,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
-import LoadingScreen from "../loading";
+import QuestionBankLoading from "./loading";
 import { useQuestionBank } from "@/hooks/useQuestionBank";
 import {
   BookOpen,
@@ -38,6 +38,7 @@ import {
   AlertCircle,
   ChevronRight,
 } from "lucide-react";
+import DeleteConfirmButton from "@/components/common/DeleteConfirmButton";
 
 export default function QuestionBank() {
   const router = useRouter();
@@ -71,8 +72,8 @@ export default function QuestionBank() {
 
   // Form data - ✅ Đã loại bỏ code
   const [subjectData, setSubjectData] = useState({ name: "" });
-  const [chapterData, setChapterData] = useState({ name: "", order: 1 });
-  const [sectionData, setSectionData] = useState({ name: "", order: 1 });
+  const [chapterData, setChapterData] = useState({ name: "", order: "" });
+  const [sectionData, setSectionData] = useState({ name: "", order: "" });
   const [uploadFile, setUploadFile] = useState(null);
 
   const [formError, setFormError] = useState(null);
@@ -97,15 +98,7 @@ export default function QuestionBank() {
     }
   }, [selectedChapter]);
 
-  const handleDeleteChapter = async (chapterId, event) => {
-    event.stopPropagation();
-    if (
-      !confirm(
-        "Are you sure you want to delete this chapter? All sections and questions in this chapter will be permanently deleted."
-      )
-    )
-      return;
-
+  const handleDeleteChapter = async (chapterId) => {
     try {
       await deleteChapter(chapterId);
 
@@ -120,22 +113,15 @@ export default function QuestionBank() {
         await loadChapters(selectedSubject.id);
       }
 
-      alert("Chapter deleted successfully!");
+      // alert("Chapter deleted successfully!");
     } catch (err) {
       console.error("Error deleting chapter:", err);
       alert("Failed to delete chapter: " + err.message);
+      throw err;
     }
   };
 
-  const handleDeleteSection = async (sectionId, event) => {
-    event.stopPropagation();
-    if (
-      !confirm(
-        "Are you sure you want to delete this section? All questions in this section will be permanently deleted."
-      )
-    )
-      return;
-
+  const handleDeleteSection = async (sectionId) => {
     try {
       await deleteSection(sectionId);
 
@@ -144,10 +130,11 @@ export default function QuestionBank() {
         await loadSections(selectedChapter.id);
       }
 
-      alert("Section deleted successfully!");
+      // alert("Section deleted successfully!");
     } catch (err) {
       console.error("Error deleting section:", err);
       alert("Failed to delete section: " + err.message);
+      throw err;
     }
   };
 
@@ -221,9 +208,9 @@ export default function QuestionBank() {
     }
 
     try {
-      await createChapter({ ...chapterData, subject: selectedSubject.id });
+      await createChapter({ ...chapterData, order: parseInt(chapterData.order) || 1, subject: selectedSubject.id });
       setIsChapterModalOpen(false);
-      setChapterData({ name: "", order: 1 }); // ✅ Reset
+      setChapterData({ name: "", order: "" });
       await loadChapters(selectedSubject.id);
     } catch (err) {
       setFormError(err.message);
@@ -244,9 +231,9 @@ export default function QuestionBank() {
     }
 
     try {
-      await createSection({ ...sectionData, chapter: selectedChapter.id });
+      await createSection({ ...sectionData, order: parseInt(sectionData.order) || 1, chapter: selectedChapter.id });
       setIsSectionModalOpen(false);
-      setSectionData({ name: "", order: 1 }); // ✅ Reset
+      setSectionData({ name: "", order: "" });
       await loadSections(selectedChapter.id);
     } catch (err) {
       setFormError(err.message);
@@ -279,15 +266,7 @@ export default function QuestionBank() {
     }
   };
 
-  const handleDeleteSubject = async (id, event) => {
-    event.stopPropagation();
-    if (
-      !confirm(
-        "Are you sure? All chapters, sections, and questions will be deleted."
-      )
-    )
-      return;
-
+  const handleDeleteSubject = async (id) => {
     try {
       await deleteSubject(id);
 
@@ -301,12 +280,17 @@ export default function QuestionBank() {
       await loadSubjects();
     } catch (err) {
       alert("Failed to delete subject: " + err.message);
+      throw err;
     }
   };
 
   const handleViewQuestions = (sectionId) => {
     router.push(`/question-bank/sections/${sectionId}`);
   };
+
+  if (loading && !subjects.length) {
+    return <QuestionBankLoading />;
+  }
 
   return (
     <>
@@ -367,12 +351,9 @@ export default function QuestionBank() {
             </Card>
           )}
 
-          {loading && !subjects.length ? (
-            <LoadingScreen message="Loading question bank..." />
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Subjects Sidebar */}
-              <Card className="border-0 shadow-lg lg:col-span-1 !p-0">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Subjects Sidebar */}
+            <Card className="border-0 shadow-lg lg:col-span-1 !p-0">
                 <CardHeader className="border-b bg-gradient-to-r from-indigo-300 to-purple-500 rounded-t-xl">
                   <div className="flex items-center gap-2 p-2">
                     <BookOpen className="h-5 w-5 text-indigo-600" />
@@ -418,16 +399,12 @@ export default function QuestionBank() {
                                 {subject.chapter_count || 0} chapters
                               </span>
                             </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) =>
-                                handleDeleteSubject(subject.id, e)
-                              }
-                              className="ml-2 hover:bg-red-100 cursor-pointer"
-                            >
-                              <Trash2 className="h-4 w-4 text-red-600" />
-                            </Button>
+                            <DeleteConfirmButton
+                              onConfirm={() => handleDeleteSubject(subject.id)}
+                              buttonText=""
+                              title="Delete Subject"
+                              description="Are you sure? All chapters, sections, and questions will be deleted."
+                            />
                           </div>
                         </div>
                       ))}
@@ -565,17 +542,11 @@ export default function QuestionBank() {
                                     </span>
                                   </TableCell>
                                   <TableCell className="text-center">
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      onClick={(e) =>
-                                        handleDeleteChapter(chapter.id, e)
-                                      }
-                                      className="hover:bg-red-600 cursor-pointer"
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-1" />
-                                      Delete
-                                    </Button>
+                                    <DeleteConfirmButton
+                                      onConfirm={() => handleDeleteChapter(chapter.id)}
+                                      title="Delete Chapter"
+                                      description="Are you sure you want to delete this chapter? All sections and questions in this chapter will be permanently deleted."
+                                    />
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -644,7 +615,11 @@ export default function QuestionBank() {
                               {sections.map((section) => (
                                 <TableRow
                                   key={section.id}
-                                  className="hover:bg-gray-50"
+                                  className="hover:bg-gray-50 cursor-pointer"
+                                  onClick={() => {
+                                      window.dispatchEvent(new Event('navigation-start'))
+                                      handleViewQuestions(section.id)
+                                    }}
                                 >
                                   <TableCell className="text-center">
                                     <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-purple-100 text-purple-700 text-lg font-semibold">
@@ -663,17 +638,6 @@ export default function QuestionBank() {
                                     <div className="flex justify-center gap-2">
                                       <Button
                                         size="sm"
-                                        variant="outline"
-                                        onClick={() =>
-                                          handleViewQuestions(section.id)
-                                        }
-                                        className="hover:bg-blue-50 cursor-pointer"
-                                      >
-                                        <Eye className="h-4 w-4 mr-1" />
-                                        View
-                                      </Button>
-                                      <Button
-                                        size="sm"
                                         className="bg-green-600 hover:bg-green-700 cursor-pointer"
                                         onClick={(e) => {
                                           e.stopPropagation();
@@ -685,17 +649,11 @@ export default function QuestionBank() {
                                         <Upload className="h-4 w-4 mr-1" />
                                         Upload
                                       </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={(e) =>
-                                          handleDeleteSection(section.id, e)
-                                        }
-                                        className="hover:bg-red-600 cursor-pointer"
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-1" />
-                                        Delete
-                                      </Button>
+                                      <DeleteConfirmButton
+                                        onConfirm={() => handleDeleteSection(section.id)}
+                                        title="Delete Section"
+                                        description="Are you sure you want to delete this section? All questions in this section will be permanently deleted."
+                                      />
                                     </div>
                                   </TableCell>
                                 </TableRow>
@@ -709,7 +667,6 @@ export default function QuestionBank() {
                 )}
               </Card>
             </div>
-          )}
         </div>
       </div>
 
@@ -796,9 +753,10 @@ export default function QuestionBank() {
                 onChange={(e) =>
                   setChapterData({
                     ...chapterData,
-                    order: parseInt(e.target.value) || 1,
+                    order: e.target.value,
                   })
                 }
+                placeholder="e.g., 1"
               />
             </div>
           </div>
@@ -862,9 +820,10 @@ export default function QuestionBank() {
                 onChange={(e) =>
                   setSectionData({
                     ...sectionData,
-                    order: parseInt(e.target.value) || 1,
+                    order: e.target.value,
                   })
                 }
+                placeholder="e.g., 1"
               />
             </div>
           </div>

@@ -287,3 +287,28 @@ class ExamAttemptResultSerializer(serializers.ModelSerializer):
             duration = obj.end_time - obj.start_time
             return int(duration.total_seconds() / 60)  # minutes
         return None
+
+class ExamAttemptListSerializer(serializers.ModelSerializer):
+    """Serializer cho danh sách attempts - dùng cho teacher xem submissions"""
+    student_name = serializers.CharField(source='student.name', read_only=True)
+    student_email = serializers.SerializerMethodField()
+    duration_taken = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExamAttempt
+        fields = [
+            'id', 'student', 'student_name', 'student_email',
+            'status', 'start_time', 'end_time', 'final_score',
+            'duration_taken'
+        ]
+
+    def get_student_email(self, obj):
+        if obj.student and obj.student.user:
+            return obj.student.user.email or ""
+        return ""
+
+    def get_duration_taken(self, obj):
+        if obj.end_time and obj.start_time:
+            duration = obj.end_time - obj.start_time
+            return int(duration.total_seconds() / 60)
+        return None

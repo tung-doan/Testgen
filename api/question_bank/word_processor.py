@@ -4,7 +4,26 @@ Supports both English and Vietnamese formats
 """
 import docx
 import re
+import hashlib
 from question_bank.models import Question, AnswerOption
+
+
+def normalize_text(text):
+    """Normalize text for comparison: lowercase, collapse whitespace."""
+    if not text:
+        return ""
+    return re.sub(r'\s+', ' ', text.strip().lower())
+
+
+def compute_fingerprint(prompt, options_texts):
+    """
+    Compute MD5 fingerprint from prompt + sorted options.
+    This allows O(1) duplicate detection via set lookup.
+    """
+    normalized_prompt = normalize_text(prompt)
+    normalized_options = sorted([normalize_text(t) for t in options_texts])
+    raw = f"{normalized_prompt}|{'|'.join(normalized_options)}"
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
 class WordQuestionParser:
     """
@@ -85,25 +104,43 @@ class WordQuestionParser:
         return 'vi' if vietnamese_count > len(text) * 0.05 else 'en'
     
     @staticmethod
-    def detect_question_type(prompt, options, language='en'):
-        """Detect question type based on content"""
+    def detect_question_type(prompt, options, answer=None, order=None, language='en'):
+        """Detect question type based on content and answer structure."""
         if not options:
             return Question.QuestionType.FILL_IN_BLANK
-        
+
         prompt_lower = prompt.lower()
-        
-        # Check for ordering
-        ordering_keywords = (WordQuestionParser.ORDERING_KEYWORDS_EN if language == 'en' 
-                           else WordQuestionParser.ORDERING_KEYWORDS_VI)
+
+        # Ordering takes precedence when there is an explicit ordering answer.
+        if order:
+            return Question.QuestionType.ORDERING
+
+        # Structural TF detection: numbered statements and answers like "1-T, 2-F".
+        has_numbered_options = any("number" in opt for opt in options)
+        tf_answer_pattern = re.compile(
+            r'^\s*\d+\s*-\s*(?:T|F|TRUE|FALSE|Y|N|YES|NO|Đ|S|ĐÚNG|SAI)(?:\s*,\s*\d+\s*-\s*(?:T|F|TRUE|FALSE|Y|N|YES|NO|Đ|S|ĐÚNG|SAI))*\s*$',
+            re.IGNORECASE
+        )
+        has_tf_answer_format = bool(answer and tf_answer_pattern.match(answer.strip()))
+        if has_numbered_options and has_tf_answer_format:
+            return Question.QuestionType.TRUE_FALSE_EXTENDED
+
+        # Check for ordering by prompt keywords.
+        ordering_keywords = (
+            WordQuestionParser.ORDERING_KEYWORDS_EN
+            if language == 'en' else WordQuestionParser.ORDERING_KEYWORDS_VI
+        )
         if any(keyword in prompt_lower for keyword in ordering_keywords):
             return Question.QuestionType.ORDERING
-        
-        # Check for true/false
-        tf_keywords = (WordQuestionParser.TRUE_FALSE_KEYWORDS_EN if language == 'en' 
-                      else WordQuestionParser.TRUE_FALSE_KEYWORDS_VI)
+
+        # Check for true/false by prompt keywords.
+        tf_keywords = (
+            WordQuestionParser.TRUE_FALSE_KEYWORDS_EN
+            if language == 'en' else WordQuestionParser.TRUE_FALSE_KEYWORDS_VI
+        )
         if any(keyword in prompt_lower for keyword in tf_keywords):
-            return Question.QuestionType.TRUE_FALSE_EXTENDED  # ✅ Fixed: TRUE_FALSE_EXTENDED not TRUE_FALSE
-        
+            return Question.QuestionType.TRUE_FALSE_EXTENDED
+
         return Question.QuestionType.MULTIPLE_CHOICE
     
     @staticmethod
@@ -237,7 +274,7 @@ class WordQuestionParser:
     def _build_question_data(question_info, options, answer, order, language='en'):
         """Build complete question data structure"""
         question_type = WordQuestionParser.detect_question_type(
-            question_info["prompt"], options, language
+            question_info["prompt"], options, answer=answer, order=order, language=language
         )
         
         print(f"[Parser] Building question data. Type: {question_type}, Options count: {len(options)}, Answer: {answer}")
@@ -357,8 +394,9 @@ class WordQuestionParser:
 
 def process_word_document(file_path, section, user):
     """
-    Process Word document and create questions in database
-    Auto-detects language (English or Vietnamese)
+    Process Word document and create questions in database.
+    Auto-detects language (English or Vietnamese).
+    Automatically skips duplicate questions (same prompt + options).
     
     Args:
         file_path: Path to the .docx file
@@ -366,11 +404,13 @@ def process_word_document(file_path, section, user):
         user: User who is creating the questions
     
     Returns:
-        dict with 'success', 'created_count', 'errors', 'language'
+        dict with 'success', 'created_count', 'skipped_count', 'skipped_duplicates', 'errors', 'language'
     """
     result = {
         "success": False,
         "created_count": 0,
+        "skipped_count": 0,
+        "skipped_duplicates": [],
         "errors": [],
         "language": "unknown"
     }
@@ -393,18 +433,44 @@ def process_word_document(file_path, section, user):
         
         print(f"[process_word_document] Found {len(questions_data)} questions to create")
         
+        # ── Build fingerprint set from existing questions in this section ──
+        existing_questions = section.questions.filter(is_active=True).prefetch_related('options')
+        existing_fingerprints = set()
+        for eq in existing_questions:
+            opts_texts = [opt.text for opt in eq.options.all()]
+            fp = compute_fingerprint(eq.prompt, opts_texts)
+            existing_fingerprints.add(fp)
+        
+        print(f"[process_word_document] Existing fingerprints in section: {len(existing_fingerprints)}")
+        
+        # Also track fingerprints within the current upload batch to avoid intra-file duplicates
+        batch_fingerprints = set()
+        
         # Create questions and options
         created_count = 0
-        num_questions = len(questions_data)
+        skipped_count = 0
+        skipped_duplicates = []
         
         for idx, data in enumerate(questions_data, 1):
             try:
-                # Create question
                 question_data = data["question"]
+                options_data = data["options"]
+                
+                # Compute fingerprint for the new question
+                new_opts_texts = [opt["text"] for opt in options_data]
+                fp = compute_fingerprint(question_data["prompt"], new_opts_texts)
+                
+                # Check for duplicates
+                if fp in existing_fingerprints or fp in batch_fingerprints:
+                    skipped_count += 1
+                    skipped_duplicates.append(question_data["prompt"][:80])
+                    print(f"[process_word_document] SKIPPED duplicate question {idx}: {question_data['prompt'][:50]}...")
+                    continue
+                
+                # Not a duplicate → create
+                batch_fingerprints.add(fp)
                 
                 print(f"[process_word_document] Creating question {idx}: {question_data['prompt'][:50]}...")
-                print(f"[process_word_document]   Type: {question_data['question_type']}")
-                print(f"[process_word_document]   Correct answer text: {question_data.get('correct_answer_text')}")
                 
                 question = Question.objects.create(
                     section=section,
@@ -414,18 +480,15 @@ def process_word_document(file_path, section, user):
                     correct_answer_text=question_data.get("correct_answer_text")
                 )
                 
-                print(f"[process_word_document] Question created with ID: {question.id}")
-                
                 # Create options
-                for opt_data in data["options"]:
-                    option = AnswerOption.objects.create(
+                for opt_data in options_data:
+                    AnswerOption.objects.create(
                         question=question,
                         text=opt_data["text"],
                         is_correct_bool=opt_data.get("is_correct_bool", False),
                         correct_order=opt_data.get("correct_order"),
                         order=opt_data["order"]
                     )
-                    print(f"[process_word_document]   Created option: {opt_data['text'][:30]}...")
                 
                 created_count += 1
                 
@@ -438,9 +501,11 @@ def process_word_document(file_path, section, user):
                 continue
         
         result["created_count"] = created_count
-        result["success"] = created_count > 0
+        result["skipped_count"] = skipped_count
+        result["skipped_duplicates"] = skipped_duplicates
+        result["success"] = created_count > 0 or skipped_count > 0
         
-        print(f"[process_word_document] Successfully created {created_count} questions")
+        print(f"[process_word_document] Created {created_count}, Skipped {skipped_count} duplicates")
         
     except Exception as e:
         error_msg = f"Critical error: {str(e)}"

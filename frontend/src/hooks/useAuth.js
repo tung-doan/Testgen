@@ -90,15 +90,15 @@ export const AuthProvider = ({ children }) => {
         let response = null;
 
         if (isStudentLogin) {
-          // ✅ Student login - Use loginStudent service
-          const { studentId, password } = credentials;
+          // Student login - Use loginStudent service
+          const { identifier, password } = credentials;
 
-          if (!studentId || !password) {
-            throw new Error("Please enter both Student ID and password");
+          if (!identifier || !password) {
+            throw new Error("Please enter both email/username and password");
           }
 
-          // ✅ Call loginStudent from utils/auth.js
-          response = await loginStudent(studentId, password);
+          // Call loginStudent from utils/auth.js
+          response = await loginStudent(identifier, password);
 
           // Store student info
           if (response.student) {
@@ -125,7 +125,6 @@ export const AuthProvider = ({ children }) => {
 
         return response;
       } catch (error) {
-        console.error("Login failed:", error);
         const errorMessage =
           error.message || "Login failed. Please check your credentials.";
         setAuthError(errorMessage);

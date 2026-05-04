@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import LoadingScreen from "@/app/loading";
+import PendingLoading from "./loading";
 import { useOnlineExam } from "@/hooks/useOnlineExam";
 import ExamCard from "@/components/exam/ExamCard";
 import StartExamDialog from "@/components/exam/StartExamDialog";
@@ -77,11 +77,12 @@ export default function PendingTests() {
 
     try {
       setIsStarting(true);
+      window.dispatchEvent(new Event("navigation-start"));
       console.log(
         "🚀 Starting exam:",
         selectedExam.id,
         "for student:",
-        studentId
+        studentId,
       );
 
       const attempt = await startExam(selectedExam.id, studentId);
@@ -99,8 +100,16 @@ export default function PendingTests() {
     }
   };
 
+  useEffect(() => {
+    if (loading && pendingExams.length === 0) {
+      window.dispatchEvent(new Event("navigation-start"));
+    } else {
+      window.dispatchEvent(new Event("navigation-end"));
+    }
+  }, [loading, pendingExams.length]);
+
   if (loading && pendingExams.length === 0) {
-    return <LoadingScreen message="Loading pending tests..." />;
+    return <PendingLoading />;
   }
 
   return (

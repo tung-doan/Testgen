@@ -7,7 +7,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Header from "@/components/Header";
 import { useAuth } from "@/hooks/useAuth";
-import LoadingScreen from "../loading";
 import { User, Lock, GraduationCap } from "lucide-react";
 
 export default function LoginPage() {
@@ -28,6 +27,8 @@ export default function LoginPage() {
 
     try {
       await login({ username, password }, false);
+      // Trigger progress bar trước khi chuyển trang
+      window.dispatchEvent(new Event("navigation-start"));
       router.push("/class");
     } catch (error) {
       setFormError(error.message || "Login failed");
@@ -36,7 +37,6 @@ export default function LoginPage() {
 
   return (
     <>
-      {actionLoading && <LoadingScreen message="Signing in..." />}
       <Header />
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-6">
         <Card className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-white border-0 hover:shadow-3xl transition-all duration-300">

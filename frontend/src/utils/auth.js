@@ -10,7 +10,7 @@ export const registerUser = async (email, username, password) => {
         return response.data;
     }
     catch (e) {
-        throw new Error("Registration failed!");
+        throw new Error(e.response?.data?.detail || "Registration failed!");
     }
 
 }
@@ -24,16 +24,16 @@ export const loginUser = async (username, password) => {
         return response.data;
     }
     catch (e) {
-        throw new Error("Login failed!");
+        throw new Error(e.response?.data?.detail || "Login failed!");
     }
 }
     
-export const loginStudent = async (studentId, password) => {
+export const loginStudent = async (identifier, password) => {
   try {
-    const response = await AuthService.studentLogin(studentId, password);
+    const response = await AuthService.studentLogin(identifier, password);
     return response;
   } catch (e) {
-    throw new Error(e.message || "Student login failed!");
+    throw new Error(e.response?.data?.detail || e.message || "Student login failed!");
   }
 };
 

@@ -12,7 +12,7 @@ class Classroom(models.Model):
         return self.name
 
 class Student(models.Model):
-    classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='students')
+    classrooms = models.ManyToManyField(Classroom, related_name='students')
     name = models.CharField(max_length=100)
     student_id = models.CharField(max_length=20, unique=True) 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -56,3 +56,24 @@ class Student(models.Model):
     
     def __str__(self):
         return f"{self.name} (ID: {self.student_id})"
+
+
+class EnrollmentRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='enrollment_requests')
+    classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='enrollment_requests')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('student', 'classroom')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.student.name} -> {self.classroom.name} ({self.status})"

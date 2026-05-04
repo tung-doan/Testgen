@@ -48,15 +48,20 @@ import {
   Image as ImageIcon,
   TrendingUp,
   AlertCircle,
+  Bell,
+  CheckCircle,
+  XCircle,
+  Mail,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import DeleteConfirmButton from "@/components/common/DeleteConfirmButton";
 
 export default function ClassroomDetail({ params }) {
   const { id } = use(params);
   const router = useRouter();
 
   // Custom hooks
-  const { getClassroomById, getStudents, addStudent, deleteStudent } =
+  const { getClassroomById, getStudents, addStudent, deleteStudent, getEnrollmentRequests, getEnrollmentRequestsCount, handleEnrollmentRequest } =
     useClassroom();
   const { getAllTests } = useTest();
   const { uploadSubmission, uploadProgress } = useSubmission();
@@ -97,8 +102,16 @@ export default function ClassroomDetail({ params }) {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
 
+  // Enrollment request states
+  const [isEnrollmentModalOpen, setIsEnrollmentModalOpen] = useState(false);
+  const [enrollmentRequests, setEnrollmentRequests] = useState([]);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [enrollmentLoading, setEnrollmentLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
+
   useEffect(() => {
     fetchClassroomData();
+    fetchPendingCount();
   }, [id]);
 
   const fetchClassroomData = async () => {
@@ -125,6 +138,51 @@ export default function ClassroomDetail({ params }) {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPendingCount = async () => {
+    try {
+      const count = await getEnrollmentRequestsCount(id);
+      setPendingRequestsCount(count);
+    } catch (err) {
+      // silently fail
+    }
+  };
+
+  const fetchEnrollmentRequests = async () => {
+    try {
+      setEnrollmentLoading(true);
+      const data = await getEnrollmentRequests(id, 'pending');
+      setEnrollmentRequests(data);
+    } catch (err) {
+      console.error('Error fetching enrollment requests:', err);
+    } finally {
+      setEnrollmentLoading(false);
+    }
+  };
+
+  const openEnrollmentModal = () => {
+    setIsEnrollmentModalOpen(true);
+    fetchEnrollmentRequests();
+  };
+
+  const handleEnrollAction = async (requestId, action) => {
+    try {
+      setActionLoadingId(requestId);
+      await handleEnrollmentRequest(requestId, action);
+      // Remove from list
+      setEnrollmentRequests(prev => prev.filter(r => r.id !== requestId));
+      setPendingRequestsCount(prev => Math.max(0, prev - 1));
+      // Refresh students if approved
+      if (action === 'approve') {
+        const studentsData = await getStudents(id);
+        setStudents(studentsData);
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to handle request');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -180,71 +238,15 @@ export default function ClassroomDetail({ params }) {
     }
   };
 
-  const handleDeleteStudent = async (studentId, event) => {
-    event.stopPropagation();
-
-    if (!window.confirm("Are you sure you want to delete this student?")) {
-      return;
-    }
-
+  const handleDeleteStudent = async (studentId) => {
     try {
       await deleteStudent(studentId);
       setStudents(students.filter((student) => student.id !== studentId));
-      alert("Student deleted successfully!");
+      // alert("Student deleted successfully!");
     } catch (err) {
       console.error("Error deleting student:", err);
       alert(`Failed to delete student: ${err.message}`);
-    }
-  };
-
-  const handleAddSubmission = (studentId, event) => {
-    event.stopPropagation();
-
-    const student = students.find((s) => s.id === studentId);
-    if (student) {
-      setCurrentStudentId(studentId);
-
-      // FIX: Đảm bảo tất cả values là string
-      setCurrentStudentInfo({
-        name: student.name || "",
-        date_of_birth: student.date_of_birth || "",
-        student_id: student.student_id || "",
-      });
-      setIsAddSubmissionModalOpen(true);
-    }
-  };
-
-  const handleSubmitSubmission = async () => {
-    try {
-      if (!submissionData.testId || !submissionData.submissionImage) {
-        setUploadError("Please select a test and upload an image");
-        return;
-      }
-
-      setUploadLoading(true);
-      setUploadError(null);
-
-      const formData = new FormData();
-      formData.append("test_id", submissionData.testId);
-      formData.append("student_id", currentStudentId);
-      formData.append("submission_image", submissionData.submissionImage);
-
-      await uploadSubmission(formData);
-
-      alert("Submission uploaded successfully!");
-      setIsAddSubmissionModalOpen(false);
-
-      // FIX: Reset về giá trị mặc định rõ ràng
-      setSubmissionData({ testId: "", submissionImage: null });
-      setCurrentStudentInfo({ name: "", date_of_birth: "", student_id: "" });
-
-      const studentsData = await getStudents(id);
-      setStudents(studentsData);
-    } catch (err) {
-      console.error("Error uploading submission:", err);
-      setUploadError(err.message || "Failed to upload submission");
-    } finally {
-      setUploadLoading(false);
+      throw err;
     }
   };
 
@@ -299,13 +301,28 @@ export default function ClassroomDetail({ params }) {
                       <p className="text-emerald-100">{classroomDescription}</p>
                     )}
                   </div>
-                  <Button
-                    onClick={handleAddStudent}
-                    className="bg-white text-emerald-700 hover:bg-emerald-50 font-medium shadow-lg"
-                  >
-                    <UserPlus className="h-5 w-5 mr-2" />
-                    Add Student
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={openEnrollmentModal}
+                      variant="outline"
+                      className="bg-white/10 border-white/30 text-white hover:bg-white/20 font-medium relative"
+                    >
+                      <Bell className="h-5 w-5 mr-2" />
+                      Pending Requests
+                      {pendingRequestsCount > 0 && (
+                        <span className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold animate-pulse">
+                          {pendingRequestsCount}
+                        </span>
+                      )}
+                    </Button>
+                    <Button
+                      onClick={handleAddStudent}
+                      className="bg-white text-emerald-700 hover:bg-emerald-50 font-medium shadow-lg"
+                    >
+                      <UserPlus className="h-5 w-5 mr-2" />
+                      Add Student
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -380,11 +397,11 @@ export default function ClassroomDetail({ params }) {
           </div>
 
           {/* Students Table */}
-          <Card className="border-0 shadow-xl">
-            <CardHeader className="border-b bg-gradient-to-r from-gray-50 to-gray-100">
+          <Card className="border-0 shadow-xl !p-0 mt-4">
+            <CardHeader className="border-b bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="bg-emerald-100 p-2 rounded-lg">
+                  <div className="p-2 rounded-lg">
                     <Users className="h-6 w-6 text-emerald-600" />
                   </div>
                   <div>
@@ -542,26 +559,13 @@ export default function ClassroomDetail({ params }) {
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center justify-center gap-2">
-                                  <Button
-                                    onClick={(e) =>
-                                      handleAddSubmission(student.id, e)
-                                    }
-                                    size="sm"
-                                    className="bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md transition-all hover:cursor-pointer hover:scale-105"
-                                  >
-                                    <Upload className="h-4 w-4 mr-1.5" />
-                                    Submit
-                                  </Button>
-                                  <Button
-                                    onClick={(e) =>
-                                      handleDeleteStudent(student.id, e)
-                                    }
-                                    size="sm"
-                                    variant="destructive"
-                                    className="shadow-sm hover:shadow-md transition-all hover:cursor-pointer hover:scale-105"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                                  <DeleteConfirmButton
+                                    onConfirm={() => handleDeleteStudent(student.id)}
+                                    buttonText=""
+                                    title="Delete Student"
+                                    description="Are you sure you want to delete this student?"
+                                    className="shadow-sm hover:shadow-md transition-all hover:scale-105"
+                                  />
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -743,184 +747,111 @@ export default function ClassroomDetail({ params }) {
       </DialogContent>
     </Dialog>
 
-      {/* Add Submission Modal */}
-      <Dialog
-        open={isAddSubmissionModalOpen}
-        onOpenChange={setIsAddSubmissionModalOpen}
-      >
-        <DialogContent className="sm:max-w-[550px]">
+      {/* Enrollment Requests Modal */}
+      <Dialog open={isEnrollmentModalOpen} onOpenChange={setIsEnrollmentModalOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-3">
-              <div className="bg-blue-100 p-2 rounded-lg">
-                <Upload className="h-6 w-6 text-blue-600" />
+              <div className="bg-orange-100 p-2 rounded-lg">
+                <Bell className="h-6 w-6 text-orange-600" />
               </div>
               <div>
                 <DialogTitle className="text-2xl font-semibold">
-                  Upload Submission
+                  Pending Requests
                 </DialogTitle>
                 <DialogDescription className="text-gray-600 mt-1">
-                  Submit test results for {currentStudentInfo.name}
+                  Students requesting to join {classroomName}
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="space-y-5 py-4">
-            {uploadError && (
-              <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg flex items-start gap-2">
-                <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                <span className="text-sm">{uploadError}</span>
+          <div className="mt-4">
+            {enrollmentLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
               </div>
-            )}
-
-            {/* Student Info Display */}
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-gray-600 mb-1">Student Name</p>
-                  <p className="font-semibold text-gray-900">
-                    {currentStudentInfo.name}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-1">Student ID</p>
-                  <p className="font-semibold text-gray-900">
-                    {currentStudentInfo.student_id}
-                  </p>
-                </div>
+            ) : enrollmentRequests.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <Bell className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                <p className="text-lg font-medium">No pending requests</p>
+                <p className="text-sm mt-1">All enrollment requests have been processed.</p>
               </div>
-            </div>
-
-            {/* Test Selection */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="testSelect"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <FileText className="h-4 w-4" />
-                Select Test <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                onValueChange={(value) =>
-                  setSubmissionData({ ...submissionData, testId: value })
-                }
-                value={submissionData.testId || ""}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Choose a test from the list" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tests.length > 0 ? (
-                    tests.map((test) => (
-                      <SelectItem
-                        key={test.id}
-                        value={test.id}
-                        className="hover:bg-gray-100"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-gray-500" />
-                          {test.title}
-                        </div>
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="no-tests" disabled>
-                      No tests available
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Image Upload */}
-            <div className="space-y-2">
-              <Label
-                htmlFor="submissionImage"
-                className="text-sm font-semibold flex items-center gap-2"
-              >
-                <ImageIcon className="h-4 w-4" />
-                Submission Image <span className="text-red-500">*</span>
-              </Label>
-              <div className="relative">
-                <Input
-                  id="submissionImage"
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) =>
-                    setSubmissionData({
-                      ...submissionData,
-                      submissionImage: e.target.files[0],
-                    })
-                  }
-                  className="w-full cursor-pointer"
-                />
-                {submissionData.submissionImage && (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-emerald-600">
-                    <ImageIcon className="h-4 w-4" />
-                    <span className="truncate">
-                      {submissionData.submissionImage.name}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 flex items-start gap-1">
-                <AlertCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
-                Upload a clear photo of the completed answer sheet for accurate
-                grading
-              </p>
-            </div>
-
-            {/* Upload Progress */}
-            {uploadProgress > 0 && uploadProgress < 100 && (
-              <div className="space-y-2 bg-blue-50 p-4 rounded-lg border border-blue-200">
-                <div className="flex justify-between text-sm text-blue-900 font-medium">
-                  <span>Uploading...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+            ) : (
+              <div className="space-y-3">
+                {enrollmentRequests.map((req) => (
                   <div
-                    className="bg-blue-600 h-full transition-all duration-300 ease-out"
-                    style={{ width: `${uploadProgress}%` }}
-                  ></div>
-                </div>
+                    key={req.id}
+                    className="flex items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="bg-blue-100 rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-blue-700 font-bold text-sm">
+                          {req.student_name?.charAt(0)?.toUpperCase() || "?"}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">
+                          {req.student_name}
+                        </p>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                          <span className="flex items-center gap-1">
+                            <IdCard className="h-3 w-3" />
+                            {req.student_id_code}
+                          </span>
+                          {req.student_email && (
+                            <span className="flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {req.student_email}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Requested {new Date(req.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                      <Button
+                        size="sm"
+                        onClick={() => handleEnrollAction(req.id, 'approve')}
+                        disabled={actionLoadingId === req.id}
+                        className="bg-green-600 hover:bg-green-700 text-white shadow-sm hover:shadow-md transition-all"
+                      >
+                        {actionLoadingId === req.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Accept
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleEnrollAction(req.id, 'reject')}
+                        disabled={actionLoadingId === req.id}
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm"
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          <DialogFooter className="gap-2">
+          <div className="flex justify-end mt-4">
             <Button
-              onClick={() => {
-                setIsAddSubmissionModalOpen(false);
-                setSubmissionData({ testId: "", submissionImage: null });
-                setUploadError(null);
-              }}
               variant="outline"
-              disabled={uploadLoading}
+              onClick={() => setIsEnrollmentModalOpen(false)}
             >
-              Cancel
+              Close
             </Button>
-            <Button
-              onClick={handleSubmitSubmission}
-              disabled={
-                uploadLoading ||
-                !submissionData.testId ||
-                !submissionData.submissionImage
-              }
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {uploadLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload Submission
-                </>
-              )}
-            </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </>

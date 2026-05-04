@@ -13,31 +13,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { TableSkeleton } from "@/components/ui/skeletons";
 import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
-import LoadingScreen from "@/app/loading";
 import OnlineExamService from "@/services/onlineExam.service";
+import DeleteConfirmButton from "@/components/common/DeleteConfirmButton";
 import {
-  Monitor,
   Plus,
-  Edit,
-  Trash2,
-  Eye,
   Users,
   Clock,
-  BarChart3,
   Search,
-  AlertCircle,
-  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export default function ManageOnlineTests() {
@@ -46,8 +33,12 @@ export default function ManageOnlineTests() {
   const [error, setError] = useState(null);
   const [exams, setExams] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [examToDelete, setExamToDelete] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   useEffect(() => {
     loadExams();
@@ -67,43 +58,27 @@ export default function ManageOnlineTests() {
   };
 
   const handleCreateNew = () => {
+    window.dispatchEvent(new Event("navigation-start"));
     router.push("/create-test/online");
   };
 
   const handleViewDetails = (examId) => {
+    window.dispatchEvent(new Event("navigation-start"));
     router.push(`/online-tests/${examId}`);
   };
 
-  const handleViewAttempts = (examId) => {
-    router.push(`/online-tests/${examId}/attempts`);
-  };
-
-  const handleViewStatistics = (examId) => {
-    router.push(`/online-tests/${examId}/statistics`);
-  };
-
-  // ✅ Removed handleDuplicate function
-
-  const confirmDelete = (exam) => {
-    setExamToDelete(exam);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDelete = async () => {
-    if (!examToDelete) return;
-
+  const handleDelete = async (examId) => {
     try {
       setLoading(true);
-      await OnlineExamService.deleteExam(examToDelete.id);
-      alert("Exam deleted successfully!");
+      await OnlineExamService.deleteExam(examId);
+      // alert("Exam deleted successfully!"); // Optional, but usually not needed with good UI flow
       await loadExams();
     } catch (err) {
       console.error("Error deleting exam:", err);
       alert("Failed to delete exam: " + err.message);
+      throw err;
     } finally {
       setLoading(false);
-      setDeleteDialogOpen(false);
-      setExamToDelete(null);
     }
   };
 
@@ -111,159 +86,105 @@ export default function ManageOnlineTests() {
     exam.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (loading && !exams.length) {
-    return <LoadingScreen message="Loading exams..." />;
+  // Pagination
+  const totalPages = Math.ceil(filteredExams.length / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const currentExams = filteredExams.slice(startIndex, startIndex + rowsPerPage);
+
+  const maxPagesToShow = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+  let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+  if (endPage - startPage + 1 < maxPagesToShow) {
+    startPage = Math.max(1, endPage - maxPagesToShow + 1);
+  }
+
+  const pageNumbers = [];
+  for (let i = startPage; i <= endPage; i++) {
+    pageNumbers.push(i);
   }
 
   return (
     <>
       <Header />
       <Navbar />
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 py-8 px-4">
-        <div className="max-w-7xl mx-auto space-y-6">
-          {/* Header */}
-          <Card className="border-0 shadow-xl overflow-hidden mb-4 !p-0">
-            <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-0 m-0">
-              <div className="flex items-center justify-between px-6 py-5">
-                <div className="flex items-center gap-4">
-                  <div className="bg-white/20 p-3 rounded-lg">
-                    <Monitor className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-3xl">
-                      Manage Online Tests
-                    </CardTitle>
-                    <p className="text-blue-100 mt-1">
-                      View, edit, and manage your online exams
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  onClick={handleCreateNew}
-                  className="bg-white text-blue-700 hover:bg-blue-50 flex items-center gap-2"
-                >
-                  <Plus className="h-5 w-5" />
-                  Create New Test
-                </Button>
-              </div>
-            </CardHeader>
-          </Card>
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Search and Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            {/* Search */}
-            <Card className="col-span-1 md:col-span-2 border-0 shadow-lg">
-              <CardContent className="p-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search exams by title..."
-                    className="pl-10"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Total Tests */}
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-blue-100 text-sm">Total Tests</p>
-                    <p className="text-3xl font-bold">{exams.length}</p>
-                  </div>
-                  <Monitor className="h-8 w-8 opacity-80" />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Active Tests */}
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-green-500 to-green-600 text-white">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-green-100 text-sm">Active</p>
-                    <p className="text-3xl font-bold">{filteredExams.length}</p>
-                  </div>
-                  <CheckCircle className="h-8 w-8 opacity-80" />
-                </div>
-              </CardContent>
-            </Card>
+      <div className="min-h-screen flex items-start justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6 pt-10">
+        <Card className="!p-0 w-full max-w-7xl shadow-2xl border-0 rounded-xl overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-t-xl px-8 py-5 flex flex-row justify-between items-center">
+            <div className="p-2">
+              <CardTitle className="text-2xl font-bold tracking-tight">
+                Manage Online Tests
+              </CardTitle>
+              <p className="text-blue-100 text-sm mt-1">
+                View, edit, and manage your online exams
+              </p>
+            </div>
+            <Button
+              onClick={handleCreateNew}
+              className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm gap-2 px-5 py-2.5 mr-2 text-sm font-medium transition-all duration-200 cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              Create Test
+            </Button>
+          </CardHeader>
+          
+          {/* Search Filter */}
+          <div className="p-4 border-b border-gray-100 bg-white">
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search exams by title..."
+                className="pl-10"
+              />
+            </div>
           </div>
 
-          {/* Exams Table */}
-          <Card className="border-0 shadow-xl !p-0">
-            <CardHeader className="border-b bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-lg">
-              <CardTitle className="flex items-center gap-2 p-3">
-                <Monitor className="h-5 w-5 text-blue-600" />
-                Online Exams ({filteredExams.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              {filteredExams.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  <Monitor className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                  <p className="text-lg mb-2">
-                    {searchTerm
-                      ? "No exams found"
-                      : "No online exams created yet"}
-                  </p>
-                  <p className="text-sm mb-4">
-                    {searchTerm
-                      ? "Try a different search term"
-                      : "Create your first online exam to get started"}
-                  </p>
-                  {!searchTerm && (
-                    <Button
-                      onClick={handleCreateNew}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Online Test
-                    </Button>
-                  )}
+          <CardContent className="p-0">
+            {loading ? (
+              <TableSkeleton rows={8} cols={6} />
+            ) : filteredExams.length === 0 ? (
+              <div className="text-center py-16 px-8">
+                <div className="text-gray-400 mb-3">
+                  <svg className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
                 </div>
+                <p className="text-gray-500 text-lg font-medium">No exams found</p>
+                <p className="text-gray-400 text-sm mt-1">
+                  {searchTerm ? "Try a different search term" : "Create your first online exam to get started"}
+                </p>
+              </div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="font-bold">Title</TableHead>
-                        <TableHead className="font-bold text-center">
-                          Class
-                        </TableHead>
-                        <TableHead className="font-bold text-center">
-                          Questions
-                        </TableHead>
-                        <TableHead className="font-bold text-center">
-                          Duration
-                        </TableHead>
-                        <TableHead className="font-bold text-center">
-                          Attempts
-                        </TableHead>
-                        <TableHead className="font-bold text-center">
-                          Actions
-                        </TableHead>
+                      <TableRow className="bg-gray-50/80 border-b border-gray-200">
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4">Title</TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4 text-center">Class</TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4 text-center">Questions</TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4 text-center">Duration</TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4 text-center">Attempts</TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4 text-center">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredExams.map((exam) => (
+                      {currentExams.map((exam, index) => (
                         <TableRow
                           key={exam.id}
-                          className="hover:bg-gray-50 transition-colors"
+                          className={`hover:bg-blue-50/60 cursor-pointer transition-all duration-150 border-b border-gray-100 ${
+                            index % 2 === 0 ? "bg-white" : "bg-gray-50/30"
+                          }`}
+                          onClick={
+                            () => {
+                              window.dispatchEvent(new Event("navigation start"))
+                              handleViewDetails(exam.id)
+                            }
+                          }
                         >
-                          <TableCell className="font-medium">
+                          <TableCell className="px-6 py-4 font-medium text-gray-900">
                             <div className="flex items-center gap-2">
-                              <Monitor className="h-4 w-4 text-blue-600" />
                               {exam.title}
                             </div>
                           </TableCell>
@@ -295,17 +216,8 @@ export default function ManageOnlineTests() {
                               Max {exam.max_attempts}
                             </Badge>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-6 py-4">
                             <div className="flex items-center justify-center gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleViewDetails(exam.id)}
-                                className="hover:bg-blue-50 cursor-pointer"
-                                title="View Details"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
                               {/* <Button
                                 size="sm"
                                 variant="outline"
@@ -325,15 +237,11 @@ export default function ManageOnlineTests() {
                                 <BarChart3 className="h-4 w-4" />
                               </Button> */}
                               {/* ✅ Removed Duplicate button */}
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => confirmDelete(exam)}
-                                className="hover:bg-red-600 cursor-pointer"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              <DeleteConfirmButton
+                                onConfirm={() => handleDelete(exam.id)}
+                                title="Delete Online Exam"
+                                description={`Are you sure you want to delete "${exam.title}"? This action cannot be undone and will remove all associated attempts and results.`}
+                              />
                             </div>
                           </TableCell>
                         </TableRow>
@@ -342,39 +250,60 @@ export default function ManageOnlineTests() {
                   </Table>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Online Exam</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{examToDelete?.title}"? This
-              action cannot be undone and will remove all associated attempts
-              and results.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={loading}
-            >
-              {loading ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {/* Pagination UI */}
+              {!loading && filteredExams.length > 0 && (
+                <>
+                  {totalPages > 1 && (
+                    <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100 bg-gray-50/50 mt-4 rounded-b-lg">
+                      <Button
+                        onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        variant="outline"
+                        className="gap-1 text-sm bg-white"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </Button>
+                      <div className="flex items-center space-x-1">
+                        {pageNumbers.map((page) => (
+                          <Button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            variant={currentPage === page ? "default" : "ghost"}
+                            size="sm"
+                            className={
+                              currentPage === page
+                                ? "bg-blue-600 hover:bg-blue-700 text-white"
+                                : "text-gray-600 hover:text-gray-900"
+                            }
+                          >
+                            {page}
+                          </Button>
+                        ))}
+                      </div>
+                      <Button
+                        onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                        variant="outline"
+                        className="gap-1 text-sm bg-white"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="px-6 py-3 border-t border-gray-100/0 bg-transparent mt-2">
+                    <p className="text-gray-500 text-xs text-center">
+                      Page {currentPage} of {totalPages} · {filteredExams.length} test{filteredExams.length !== 1 ? "s" : ""} total
+                    </p>
+                  </div>
+                </>
+              )}
+            </CardContent>
+        </Card>
+      </div>
     </>
   );
 }

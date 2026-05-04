@@ -1,68 +1,165 @@
 from rest_framework import serializers
-from .models import Classroom, PaperTest, PaperTestQuestion, PaperSubmission, PaperAnswerDetected, PaperUserAnswer
+from .models import Classroom, PaperTest, PaperTestQuestion,PaperTestVariant, PaperSubmission, PaperAnswerDetected, PaperUserAnswer
+from classrooms.models import Classroom
+from question_bank.models import Question
+from question_bank.serializers import QuestionDetailSerializer
 from django.contrib.auth import get_user_model
+import random
 
 User = get_user_model()
-
-
-class QuestionSerializer(serializers.ModelSerializer):
+class PaperTestQuestionSerializer(serializers.ModelSerializer):
+    question_detail = QuestionDetailSerializer(source='question', read_only=True)
+    
     class Meta:
         model = PaperTestQuestion
-        fields = ['id', 'test', 'text', 'correct_answer', 'score']
-        read_only_fields = ['test']
+        fields = ['id', 'question', 'question_detail', 'order']
 
-class QuestionCreateSerializer(serializers.ModelSerializer):
+
+class PaperTestVariantSerializer(serializers.ModelSerializer):
+    """Serializer cho Paper Test Variant"""
+    
     class Meta:
-        model = PaperTestQuestion
-        fields = ['text', 'correct_answer', 'score']
+        model = PaperTestVariant
+        fields = [
+            'id', 'test', 'variant_code', 'question_order', 
+            'answer_shuffles', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
 
 class TestSerializer(serializers.ModelSerializer):
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     classroom = serializers.PrimaryKeyRelatedField(queryset=Classroom.objects.all(), allow_null=True)
-    questions = QuestionSerializer(many=True, read_only=True)
+    paper_questions = PaperTestQuestionSerializer(many=True, read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    num_variants = serializers.IntegerField(default=1)
+    variant_count = serializers.SerializerMethodField()
 
     class Meta:
         model = PaperTest
         fields = ['id', 'title', 'description', 'num_questions', 'num_choices', 
-                 'allow_multiple_answers', 'created_by', 'classroom', 'created_at', 'questions']
+                 'allow_multiple_answers', 'created_by', 'classroom', 'created_at', 'paper_questions', 'num_variants', 'variant_count']
 
+    def get_variant_count(self, obj):
+        return obj.variants.count()
 class TestCreateSerializer(serializers.ModelSerializer):
-    questions = QuestionCreateSerializer(many=True, required=False)
-    classroom = serializers.PrimaryKeyRelatedField(queryset=Classroom.objects.all(), allow_null=True, required=False)
+    questions = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=True
+    )
+    num_variants = serializers.IntegerField(default=1, min_value=1, max_value=10)
+    classroom = serializers.PrimaryKeyRelatedField(
+        queryset=Classroom.objects.all(), 
+        allow_null=True, 
+        required=False
+    )
 
     class Meta:
         model = PaperTest
         fields = ['title', 'description', 'num_questions', 'num_choices', 
-                 'allow_multiple_answers', 'classroom', 'questions']
+                 'allow_multiple_answers', 'classroom', 'questions', 'num_variants']
 
     def create(self, validated_data):
-        questions_data = validated_data.pop('questions', [])
-        test = PaperTest.objects.create(**validated_data)
-        for question_data in questions_data:
-            PaperTestQuestion.objects.create(test=test, **question_data)
+        questions_ids = validated_data.pop('questions', [])
+        num_variants = validated_data.pop('num_variants', 1)
+        validated_data['num_questions'] = len(questions_ids)
+        # Tạo test
+        test = PaperTest.objects.create(**validated_data)   
+        # Thêm câu hỏi vào test
+        for index, question_id in enumerate(questions_ids, start=1):
+            try:
+                question = Question.objects.get(id=question_id)
+                PaperTestQuestion.objects.create(
+                    test=test,
+                    question=question,
+                    order=index
+                )
+            except Question.DoesNotExist:
+                continue
+        if num_variants > 0:
+            generate_test_variants(test, num_variants)
         return test
 
     def update(self, instance, validated_data):
-        questions_data = validated_data.pop('questions', None)
+        questions_ids = validated_data.pop('questions', None)
+        
+        # Cập nhật các trường cơ bản
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if questions_data is not None:
-            instance.questions.all().delete()
-            for question_data in questions_data:
-                PaperTestQuestion.objects.create(test=instance, **question_data)
+        # Cập nhật danh sách câu hỏi nếu có
+        if questions_ids is not None:
+            # Xóa tất cả câu hỏi cũ
+            instance.paper_questions.all().delete()
+            
+            # Cập nhật num_questions
+            instance.num_questions = len(questions_ids)
+            instance.save()
+            
+            # Thêm câu hỏi mới
+            for index, question_id in enumerate(questions_ids, start=1):
+                try:
+                    question = Question.objects.get(id=question_id)
+                    PaperTestQuestion.objects.create(
+                        test=instance,
+                        question=question,
+                        order=index
+                    )
+                except Question.DoesNotExist:
+                    continue
 
         return instance
-
+    
+def generate_test_variants(test, num_variants):
+    """
+    Tạo variants với mã 3 số:
+    - Mỗi mã là tổ hợp 3 chữ số (0-9)
+    - VD: 001, 012, 023, 134, 245...
+    """
+    # ✅ TẠO DANH SÁCH MÃ ĐỀ 3 SỐ
+    used_codes = set()
+    variant_codes = []
+    
+    while len(variant_codes) < num_variants:
+        # Random 3 chữ số
+        code = ''.join([str(random.randint(0, 9)) for _ in range(3)])
+        
+        # Đảm bảo không trùng
+        if code not in used_codes:
+            used_codes.add(code)
+            variant_codes.append(code)
+    
+    # Lấy câu hỏi gốc
+    original_questions = list(test.paper_questions.values_list('question_id', flat=True))
+    num_choices = test.num_choices
+    
+    for code in variant_codes:
+        # 1. Shuffle thứ tự câu hỏi
+        shuffled_questions = original_questions.copy()
+        random.shuffle(shuffled_questions)
+        
+        # 2. Shuffle thứ tự đáp án cho mỗi câu
+        answer_shuffles = {}
+        for q_id in shuffled_questions:
+            shuffle_order = list(range(num_choices))
+            random.shuffle(shuffle_order)
+            answer_shuffles[str(q_id)] = shuffle_order
+        
+        # 3. Tạo variant
+        PaperTestVariant.objects.create(
+            test=test,
+            variant_code=code,  # ✅ MÃ 3 SỐ
+            question_order=shuffled_questions,
+            answer_shuffles=answer_shuffles
+        )
 class AnswerDetectedSerializer(serializers.ModelSerializer):
     question = serializers.PrimaryKeyRelatedField(queryset=PaperTestQuestion.objects.all())
     submission = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = PaperAnswerDetected
-        fields = ['id', 'submission', 'question', 'is_correct', 'score', 'confidence']
+        fields = ['id', 'submission', 'question', 'is_correct', 'score']
 
 class UserAnswerSerializer(serializers.ModelSerializer):
     question = serializers.PrimaryKeyRelatedField(queryset=PaperTestQuestion.objects.all())
@@ -70,7 +167,7 @@ class UserAnswerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PaperUserAnswer
-        fields = ['id', 'submission', 'question', 'selected_option']
+        fields = ['id', 'submission', 'question', 'selected_options']
 
 # class SubmissionSerializer(serializers.ModelSerializer):
 #     user = serializers.PrimaryKeyRelatedField(read_only=True)

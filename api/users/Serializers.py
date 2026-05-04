@@ -133,9 +133,17 @@ class LoginSerializer(serializers.ModelSerializer):
         fields = ('password', 'username', 'tokens')  # Include the password field in the serializer
 
     def validate(self, data):
+        username = data.get('username')
+        password = data.get('password')
+        
+        # Check if user exists
+        user_exists = User.objects.filter(username=username).exists()
+        if not user_exists:
+            raise AuthenticationFailed('Username does not exist')
+            
         user = authenticate(**data)
         if user is None:
-           raise AuthenticationFailed('Invalid Password, try again')
+           raise AuthenticationFailed('Incorrect password')
        
         if not user.is_active:
             raise AuthenticationFailed('Account disabled, contact admin')
@@ -193,14 +201,88 @@ class UserSerializer(serializers.ModelSerializer):
         return hasattr(obj, 'student_profile') and obj.student_profile is not None
     
     def get_student_info(self, obj):
-        """Get student information if user is a student"""
         if hasattr(obj, 'student_profile') and obj.student_profile:
             student = obj.student_profile
+            classrooms_data = [
+                {
+                    'id': classroom.id,
+                    'name': classroom.name
+                } for classroom in student.classrooms.all()
+            ]
+            
             return {
                 "id": student.id,
                 "name": student.name,
                 "student_id": student.student_id,
-                "classroom_id": student.classroom.id if student.classroom else None,
-                "classroom_name": student.classroom.name if student.classroom else None,
+                "classrooms": classrooms_data,
             }
         return None
+
+
+class StudentRegisterSerializer(serializers.Serializer):
+    """Serializer for student self-registration - creates User + Student"""
+    email = serializers.EmailField()
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(max_length=150, write_only=True)
+    confirm_password = serializers.CharField(max_length=150, write_only=True)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    name = serializers.CharField(max_length=100)
+
+    def validate(self, attrs):
+        password = attrs.get('password')
+        confirm_password = attrs.get('confirm_password')
+        username = attrs.get('username')
+        email = attrs.get('email')
+        
+        if password != confirm_password:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        
+        if len(password) < 6:
+            raise serializers.ValidationError({
+                'password': 'Password must be at least 6 characters long'
+            })
+        
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError({
+                'username': 'Username already exists'
+            })
+        
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError({
+                'email': 'Email already exists'
+            })
+        
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('confirm_password', None)
+        name = validated_data.pop('name')
+        date_of_birth = validated_data.pop('date_of_birth', None)
+        
+        # Create User
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            date_of_birth=date_of_birth,
+        )
+        user.set_password(validated_data['password'])
+        user.is_authorized = True
+        user.save()
+        
+        # Auto-generate student_id
+        student_id = f"STU_{user.id:06d}"
+        
+        # Create linked Student profile
+        from classrooms.models import Student
+        student = Student.objects.create(
+            name=name,
+            student_id=student_id,
+            user=user,
+        )
+        
+        return {
+            'user': user,
+            'student': student,
+        }
