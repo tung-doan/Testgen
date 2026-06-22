@@ -2,6 +2,11 @@ import { useState, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 
+const getApiBaseUrl = () =>
+  process.env.NEXT_PUBLIC_API_URL === "http://localhost:8000/api/"
+    ? "/api/"
+    : process.env.NEXT_PUBLIC_API_URL || "/api/";
+
 /**
  * Custom hook để xử lý các API requests
  * @returns {Object} Các phương thức và state để tương tác với API
@@ -14,7 +19,7 @@ export function useApi() {
 
   // Tạo axios instance với các cấu hình mặc định
   const apiClient = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/",
+    baseURL: getApiBaseUrl(),
     withCredentials: true,
     headers: {
       'Content-Type': 'application/json',

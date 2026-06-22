@@ -11,6 +11,8 @@ RUN npm install
 COPY . .
 
 # Build ứng dụng Next.js
+ARG INTERNAL_API_URL=http://127.0.0.1:8000
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
 RUN npm run build
 
 # Mở port 3000

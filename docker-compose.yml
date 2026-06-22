@@ -17,7 +17,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379
     env_file:
       - ./api/.env
     depends_on:
@@ -32,7 +32,7 @@ services:
       dockerfile: Dockerfile
     command: celery -A api worker --loglevel=info --concurrency=1
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379
     env_file:
       - ./api/.env
     depends_on:
@@ -47,7 +47,7 @@ services:
       dockerfile: Dockerfile
     command: celery -A api beat --loglevel=info
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379
     env_file:
       - ./api/.env
     depends_on:
@@ -60,10 +60,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        INTERNAL_API_URL: http://api:8000
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/
+      - INTERNAL_API_URL=http://api:8000
     depends_on:
       - api
     restart: unless-stopped

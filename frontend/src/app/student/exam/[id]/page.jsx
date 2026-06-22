@@ -32,6 +32,10 @@ import {
 const QUESTIONS_PER_PAGE = 40;
 // Auto-save interval in milliseconds (every 30 seconds)
 const AUTO_SAVE_INTERVAL = 30000;
+const getApiBaseUrl = () =>
+  process.env.NEXT_PUBLIC_API_URL === "http://localhost:8000/api/"
+    ? "/api/"
+    : process.env.NEXT_PUBLIC_API_URL || "/api/";
 
 export default function TakeExam({ params }) {
   const { id } = use(params);
@@ -116,7 +120,7 @@ export default function TakeExam({ params }) {
         (answer) => answer !== null
       );
       if (formattedAnswers.length > 0) {
-        const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/';
+        const baseURL = getApiBaseUrl();
         const url = `${baseURL}online-exams/attempts/${id}/save-answers/`;
         try {
           const xhr = new XMLHttpRequest();

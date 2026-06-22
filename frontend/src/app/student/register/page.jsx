@@ -16,12 +16,10 @@ import {
   ArrowLeft,
   UserPlus,
 } from "lucide-react";
-import axios from "axios";
+import apiClient from "@/services/api-client";
 
 export default function StudentRegister() {
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -88,11 +86,7 @@ export default function StudentRegister() {
         payload.date_of_birth = formData.date_of_birth;
       }
 
-      const response = await axios.post(
-        `${apiUrl}users/student-register/`,
-        payload,
-        { withCredentials: true }
-      );
+      const response = await apiClient.post("users/student-register/", payload);
 
       const data = response.data;
 

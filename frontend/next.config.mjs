@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const internalApiUrl = process.env.INTERNAL_API_URL || 'http://127.0.0.1:8000';
+
 const nextConfig = {
   reactStrictMode: false,
   skipTrailingSlashRedirect: true,
@@ -22,11 +24,11 @@ const nextConfig = {
       beforeFiles: [
         {
           source: '/api/:path(.*)',
-          destination: 'http://127.0.0.1:8000/api/:path',
+          destination: `${internalApiUrl}/api/:path`,
         },
         {
           source: '/media/:path(.*)',
-          destination: 'http://127.0.0.1:8000/media/:path',
+          destination: `${internalApiUrl}/media/:path`,
         },
       ],
     };

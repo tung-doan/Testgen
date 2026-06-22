@@ -14,15 +14,13 @@ import {
 } from "@/components/ui/select";
 import React, { useState } from "react";
 import { User, Mail, Calendar, Lock } from "lucide-react";
-import axios from "axios";
+import apiClient from "@/services/api-client";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Notification from "@/components/common/Notification";
 
 export default function Frame() {
   const router = useRouter();
-  const apiurl = process.env.NEXT_PUBLIC_API_URL;
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [username, setUsername] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -71,10 +69,8 @@ export default function Frame() {
     // Trigger progress bar
     window.dispatchEvent(new Event("navigation-start"));
 
-    const endpoint = `${apiurl ? apiurl.replace(/\/$/, "") : ""}/users/register/`;
-
-    axios
-      .post(endpoint, {
+    apiClient
+      .post("users/register/", {
         username,
         full_name: firstName,
         email,
