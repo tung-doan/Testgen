@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import Navbar from "@/components/Navbar";
 import CreateOnlineTestLoading from "./loading";
 import { useQuestionBank } from "@/hooks/useQuestionBank";
 import { useClassroom } from "@/hooks/useClassroom";
+import Notification from "@/components/common/Notification";
 import {
   Monitor,
   Clock,
@@ -31,17 +32,30 @@ import {
   Shuffle,
 } from "lucide-react";
 import OnlineExamService from "@/services/onlineExam.service";
+import extractErrorMessage from "@/lib/extractErrorMessage";
 
 export default function CreateOnlineTest() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("editId");
   const { fetchSubjects, fetchChapters, fetchSections, fetchQuestions } =
     useQuestionBank();
   const { getAllClassrooms } = useClassroom();
 
   const [loading, setLoading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState(null);
+  const [notification, setNotification] = useState({
+    show: false,
+    message: "",
+    type: "success",
+  });
 
-  // Form data
+  const showNotification = (message, type = "success") => {
+    setNotification({ show: true, message, type });
+  };
+
+ // Form data
   const [testData, setTestData] = useState({
     title: "",
     description: "",
@@ -49,31 +63,52 @@ export default function CreateOnlineTest() {
     duration_minutes: 45,
     max_attempts: 1,
     show_results_immediately: true,
+ // publish_now: boolean - default true (checked)
+    publish_now: true,
+    publish_at: "",
   });
 
-  // Question Bank data
+ // Question Bank data
   const [subjects, setSubjects] = useState([]);
   const [chapters, setChapters] = useState([]);
   const [sections, setSections] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
 
-  // Selected filters
+ // Selected filters
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
 
-  // Selected questions for exam
+ // Selected questions for exam
   const [selectedQuestions, setSelectedQuestions] = useState([]);
   const [questionPoints, setQuestionPoints] = useState({});
 
-  // Random questions feature
+ // Question filters
+  const [questionSearchTerm, setQuestionSearchTerm] = useState("");
+  const [questionTypeFilter, setQuestionTypeFilter] = useState("all");
+
+ // Random questions feature
   const [randomCount, setRandomCount] = useState("");
   const [showRandomInput, setShowRandomInput] = useState(false);
+
+  const toLocalDateTimeInput = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return "";
+    const offset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  };
 
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  useEffect(() => {
+    if (editId && subjects.length > 0 && classrooms.length > 0) {
+      loadExamForEdit(editId);
+    }
+  }, [editId, subjects.length, classrooms.length]);
 
   useEffect(() => {
     if (selectedSubject) {
@@ -97,9 +132,9 @@ export default function CreateOnlineTest() {
 
   useEffect(() => {
     if (selectedSection) {
-      loadQuestions(selectedSection);
+      loadQuestions(selectedSection, questionTypeFilter);
     }
-  }, [selectedSection]);
+  }, [selectedSection, questionTypeFilter]);
 
   const loadInitialData = async () => {
     try {
@@ -111,8 +146,10 @@ export default function CreateOnlineTest() {
       setSubjects(subjectsData);
       setClassrooms(classroomsData);
     } catch (err) {
-      console.error("Error loading initial data:", err);
-      setError("Failed to load data");
+      const msg = extractErrorMessage(err, "Failed to load initial data");
+      console.debug("Error loading initial data:", err);
+      showNotification(msg, "error");
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -123,7 +160,9 @@ export default function CreateOnlineTest() {
       const data = await fetchChapters(subjectId);
       setChapters(data);
     } catch (err) {
-      console.error("Error loading chapters:", err);
+      const msg = extractErrorMessage(err, "Failed to load chapters");
+      console.debug("Error loading chapters:", err);
+      showNotification(msg, "error");
     }
   };
 
@@ -132,79 +171,161 @@ export default function CreateOnlineTest() {
       const data = await fetchSections(chapterId);
       setSections(data);
     } catch (err) {
-      console.error("Error loading sections:", err);
+      const msg = extractErrorMessage(err, "Failed to load sections");
+      console.debug("Error loading sections:", err);
+      showNotification(msg, "error");
     }
   };
 
-  const loadQuestions = async (sectionId) => {
+  const loadQuestions = async (sectionId, typeFilter = "all") => {
     try {
-      const data = await fetchQuestions({ section_id: sectionId });
+      const filters = { section_id: sectionId };
+      if (typeFilter !== "all") {
+        filters.question_type = typeFilter;
+      }
+      const data = await fetchQuestions(filters);
       setQuestions(data);
     } catch (err) {
-      console.error("Error loading questions:", err);
+      const msg = extractErrorMessage(err, "Failed to load questions");
+      console.debug("Error loading questions:", err);
+      showNotification(msg, "error");
+    }
+  };
+
+  const loadExamForEdit = async (examId) => {
+    try {
+      setLoading(true);
+      const [examData, examQuestionsData] = await Promise.all([
+        OnlineExamService.getExamDetail(examId),
+        OnlineExamService.getExamQuestions(examId),
+      ]);
+
+ // Check if exam is already published
+      if (examData.is_published) {
+        showNotification(
+          "This exam has been published and cannot be updated",
+          "error",
+        );
+        setError("This exam has been published and cannot be updated");
+        router.push("/online-tests");
+        return;
+      }
+
+      setTestData({
+        title: examData.title || "",
+        description: examData.description || "",
+        classroom_id: examData.classroom || null,
+        duration_minutes: examData.duration_minutes ?? 45,
+        max_attempts: examData.max_attempts ?? 1,
+        show_results_immediately: Boolean(examData.show_results_immediately),
+        publish_now: Boolean(examData.is_published),
+        publish_at: toLocalDateTimeInput(examData.publish_at),
+      });
+
+      const mappedQuestions = examQuestionsData.map((item) => item.question);
+      setSelectedQuestions(mappedQuestions);
+
+      const mappedPoints = {};
+      examQuestionsData.forEach((item) => {
+        mappedPoints[item.question.id] = item.points ?? 1.0;
+      });
+      setQuestionPoints(mappedPoints);
+
+      const firstQuestion = examQuestionsData[0]?.question;
+      if (firstQuestion?.section) {
+        setSelectedSection(firstQuestion.section);
+      }
+    } catch (err) {
+      const msg = extractErrorMessage(err, "Failed to load exam for update");
+      console.debug("Error loading exam for edit:", err);
+      showNotification(msg, "error");
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleToggleQuestion = (question) => {
-    const isSelected = selectedQuestions.some((q) => q.id === question.id);
-
-    if (isSelected) {
-      setSelectedQuestions(
-        selectedQuestions.filter((q) => q.id !== question.id)
+    setSelectedQuestions((currentSelectedQuestions) => {
+      const isSelected = currentSelectedQuestions.some(
+        (q) => String(q.id) === String(question.id),
       );
-    } else {
-      setSelectedQuestions([...selectedQuestions, question]);
-    }
+
+      if (isSelected) {
+        return currentSelectedQuestions.filter(
+          (q) => String(q.id) !== String(question.id),
+        );
+      }
+
+      return [...currentSelectedQuestions, question];
+    });
   };
 
   const handleRandomSelect = () => {
     const count = parseInt(randomCount);
 
-    // Validation
+ // Validation
     if (!count || count < 1) {
-      setError("Please enter a valid number");
+      showNotification("Please enter a valid number", "error");
       return;
     }
 
-    if (count > questions.length) {
-      setError(`Only ${questions.length} questions available in this section`);
-      return;
-    }
-
-    // Tạo danh sách ngẫu nhiên mới từ danh sách hiện tại (questions)
-    const shuffled = [...questions].sort(() => Math.random() - 0.5);
-    const randomQuestions = shuffled.slice(0, count);
-
-    // Lấy danh sách ID của các câu hỏi trong Section hiện tại đang hiển thị
-    const currentSectionQuestionIds = new Set(questions.map((q) => q.id));
-
-    // Giữ lại các câu hỏi đã chọn TRƯỚC ĐÓ mà KHÔNG thuộc Section này
-    // (Ví dụ: bạn đã chọn câu hỏi ở Chương 1, giờ đang chọn random ở Chương 2 thì không được xóa của Chương 1)
-    const questionsFromOtherSections = selectedQuestions.filter(
-      (q) => !currentSectionQuestionIds.has(q.id)
+ // Calculate available questions (not already selected) from current section
+    const currentSelectedIds = new Set(
+      selectedQuestions.map((q) => String(q.id)),
     );
 
-    //Gộp câu hỏi cũ (của section khác) + câu hỏi random mới (của section này)
-    const newSelected = [...questionsFromOtherSections, ...randomQuestions];
+    const availableQuestions = questions.filter(
+      (q) => !currentSelectedIds.has(String(q.id)),
+    );
 
-    //Cập nhật lại điểm số (Points)
-    const newPoints = { ...questionPoints };
+ // If all questions in section are already selected
+    if (availableQuestions.length === 0) {
+      showNotification(
+        "All questions in this section are already selected",
+        "info",
+      );
+      setRandomCount("");
+      setShowRandomInput(false);
+      return;
+    }
 
-    questions.forEach((q) => {
-      if (!randomQuestions.find((rq) => rq.id === q.id)) {
-        delete newPoints[q.id];
-      }
+ // Calculate actual count to add (min of requested or available)
+    const actualCount = Math.min(count, availableQuestions.length);
+
+ // Shuffle and select from available questions
+    const shuffled = [...availableQuestions].sort(() => Math.random() - 0.5);
+    const randomQuestions = shuffled.slice(0, actualCount);
+
+ // Update state by merging new questions with existing
+    setSelectedQuestions((currentSelectedQuestions) => [
+      ...currentSelectedQuestions,
+      ...randomQuestions,
+    ]);
+
+    setQuestionPoints((currentPoints) => {
+      const nextPoints = { ...currentPoints };
+
+      randomQuestions.forEach((question) => {
+        if (nextPoints[question.id] === undefined) {
+          nextPoints[question.id] = 1.0;
+        }
+      });
+
+      return nextPoints;
     });
 
-    // Thêm điểm mặc định cho các câu hỏi random mới
-    randomQuestions.forEach((question) => {
-      newPoints[question.id] = question.points || 1.0;
-    });
+ // Show smart notification
+    if (count > availableQuestions.length) {
+      showNotification(
+        `Only ${availableQuestions.length} question(s) available in this section. Added all ${actualCount} question(s).`,
+        "warning",
+      );
+    } else {
+      showNotification(`Added ${actualCount} question(s)`, "success");
+    }
 
-    setSelectedQuestions(newSelected);
-    setQuestionPoints(newPoints);
-
-    // Reset UI
+ // Reset UI
     setRandomCount("");
     setShowRandomInput(false);
     setError(null);
@@ -229,26 +350,37 @@ export default function CreateOnlineTest() {
   };
 
   const handleRemoveQuestion = (questionId) => {
-    setSelectedQuestions(selectedQuestions.filter((q) => q.id !== questionId));
-    const newPoints = { ...questionPoints };
-    delete newPoints[questionId];
-    setQuestionPoints(newPoints);
+    setSelectedQuestions((currentSelectedQuestions) =>
+      currentSelectedQuestions.filter(
+        (q) => String(q.id) !== String(questionId),
+      ),
+    );
+    setQuestionPoints((currentPoints) => {
+      const nextPoints = { ...currentPoints };
+      delete nextPoints[questionId];
+      return nextPoints;
+    });
   };
 
+  const filteredQuestions = questions.filter((question) => {
+    const matchesSearch = question.prompt
+      .toLowerCase()
+      .includes(questionSearchTerm.toLowerCase());
+    return matchesSearch;
+  });
+
+  const isQuestionSelected = (questionId) =>
+    selectedQuestions.some((q) => String(q.id) === String(questionId));
+
   const calculateTotalPoints = () => {
-    // Dùng Set để lọc trùng ID câu hỏi
     const uniqueIds = new Set();
 
     return selectedQuestions.reduce((sum, q) => {
-      // Nếu ID này đã cộng rồi thì bỏ qua (fix lỗi tăng gấp đôi)
       if (uniqueIds.has(q.id)) return sum;
       uniqueIds.add(q.id);
 
-      // Lấy điểm từ state questionPoints
       const rawPoint = questionPoints[q.id];
 
-      // Nếu đang là chuỗi rỗng "" hoặc chưa có, lấy điểm mặc định
-      // Nếu là số thì lấy số
       const finalPoint =
         rawPoint === "" || rawPoint === undefined
           ? q.points || 0
@@ -260,9 +392,11 @@ export default function CreateOnlineTest() {
 
   useEffect(() => {
     if (selectedQuestions.length > 0) {
-      const defaultPoints = {};
+      const defaultPoints = { ...questionPoints };
       selectedQuestions.forEach((q) => {
-        defaultPoints[q.id] = 1.0; // Mặc định mỗi câu 1 điểm
+        if (defaultPoints[q.id] === undefined) {
+          defaultPoints[q.id] = 1.0;
+        }
       });
       setQuestionPoints(defaultPoints);
     }
@@ -271,33 +405,55 @@ export default function CreateOnlineTest() {
   const calculateScaledTotal = () => {
     const rawTotal = calculateTotalPoints();
     if (rawTotal === 0) return 0;
-    // Giả sử tất cả câu đúng -> Hiển thị thang 10
     return 10.0;
   };
 
   const handleSubmit = async () => {
     setError(null);
 
-    // Validation
+ // Validation
     if (!testData.title) {
-      setError("Test title is required");
+      showNotification("Test title is required", "error");
+      return;
+    }
+
+    if (!testData.classroom_id) {
+      showNotification("Please select a class", "error");
       return;
     }
 
     if (selectedQuestions.length === 0) {
-      setError("Please select at least one question");
+      showNotification("Please select at least one question", "error");
       return;
     }
 
-    if (testData.duration_minutes < 1) {
-      setError("Duration must be at least 1 minute");
+    if (testData.duration_minutes === "" || testData.duration_minutes < 1) {
+      showNotification("Duration must be at least 1 minute", "error");
+      return;
+    }
+
+    if (testData.duration_minutes > 240) {
+      showNotification("Duration cannot exceed 240 minutes", "error");
+      return;
+    }
+
+    if (testData.max_attempts === "" || testData.max_attempts < 1) {
+      showNotification(
+        "Max attempts is required and must be at least 1",
+        "error",
+      );
+      return;
+    }
+
+    if (testData.max_attempts > 999) {
+      showNotification("Max attempts cannot exceed 999", "error");
       return;
     }
 
     try {
-      setLoading(true);
+      setIsCreating(true);
 
-      // Prepare payload
+ // Prepare payload
       const payload = {
         title: testData.title,
         classroom: testData.classroom_id,
@@ -307,10 +463,44 @@ export default function CreateOnlineTest() {
         questions: selectedQuestions.map((q) => q.id),
       };
 
-      // Create exam
-      const exam = await OnlineExamService.createExam(payload);
+ // Handle publish: publish_now checkbox controls behavior
+      if (testData.publish_now) {
+        payload.is_published = true;
+        payload.publish_at = null;
+      } else {
+ // scheduled publish - require a valid future datetime
+        if (!testData.publish_at) {
+          showNotification("Please select a publish date and time", "error");
+          setIsCreating(false);
+          return;
+        }
 
-      // Update question points if different from default
+        const scheduledDate = new Date(testData.publish_at);
+        if (isNaN(scheduledDate.getTime())) {
+          showNotification("Invalid publish date/time", "error");
+          setIsCreating(false);
+          return;
+        }
+
+        const now = new Date();
+        if (scheduledDate <= now) {
+          showNotification("Publish date/time must be in the future", "error");
+          setIsCreating(false);
+          return;
+        }
+
+        payload.is_published = false;
+        payload.publish_at = scheduledDate.toISOString();
+      }
+
+      const isEditing = Boolean(editId);
+
+ // Create or update exam
+      const exam = isEditing
+        ? await OnlineExamService.updateExam(editId, payload)
+        : await OnlineExamService.createExam(payload);
+
+ // Update question points if different from default
       const questionsWithPoints = selectedQuestions.map((q, index) => ({
         question_id: q.id,
         order: index + 1,
@@ -319,27 +509,25 @@ export default function CreateOnlineTest() {
 
       await OnlineExamService.updateExamQuestions(exam.id, questionsWithPoints);
 
-      alert("Online test created successfully!");
+      showNotification(
+        isEditing
+          ? "Online test updated successfully!"
+          : "Online test created successfully!",
+        "success",
+      );
+      window.dispatchEvent(new Event("navigation-start"));
       router.push("/online-tests");
     } catch (err) {
-      console.error("Error creating test:", err);
-      let errorMessage = "Failed to create test";
-
-      if (err.response && err.response.data) {
-        const data = err.response.data;
-        if (data.questions && Array.isArray(data.questions)) {
-          errorMessage = data.questions[0];
-        } else if (data.error) {
-          errorMessage = data.error;
-        }
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-
+      console.debug("Error creating test:", err);
+      const errorMessage = extractErrorMessage(
+        err,
+        editId ? "Failed to update test" : "Failed to create test",
+      );
+      showNotification(errorMessage, "error");
       setError(errorMessage);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
-      setLoading(false);
+      setIsCreating(false);
     }
   };
 
@@ -373,7 +561,7 @@ export default function CreateOnlineTest() {
                   </div>
                   <div>
                     <CardTitle className="text-3xl">
-                      Create Online Test
+                      {editId ? "Update Online Test" : "Create Online Test"}
                     </CardTitle>
                     <p className="text-blue-100 mt-1">
                       Build interactive online exams with questions from your
@@ -425,13 +613,13 @@ export default function CreateOnlineTest() {
                 </div>
 
                 <div>
-                  <Label htmlFor="classroom">Class (Optional)</Label>
+                  <Label htmlFor="classroom">Class *</Label>
                   <Select
-                    value={testData.classroom_id?.toString() || "none"}
+                    value={testData.classroom_id?.toString() || ""}
                     onValueChange={(value) =>
                       setTestData({
                         ...testData,
-                        classroom_id: value === "none" ? null : parseInt(value),
+                        classroom_id: parseInt(value),
                       })
                     }
                   >
@@ -439,7 +627,6 @@ export default function CreateOnlineTest() {
                       <SelectValue placeholder="Select a class" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No class</SelectItem>
                       {classrooms.map((classroom) => (
                         <SelectItem
                           key={classroom.id}
@@ -461,13 +648,23 @@ export default function CreateOnlineTest() {
                     id="duration"
                     type="number"
                     min="1"
+                    max="240"
                     value={testData.duration_minutes}
-                    onChange={(e) =>
-                      setTestData({
-                        ...testData,
-                        duration_minutes: parseInt(e.target.value) || 1,
-                      })
-                    }
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        setTestData({ ...testData, duration_minutes: "" });
+                        return;
+                      }
+                      let num = parseInt(raw, 10);
+                      if (isNaN(num)) {
+                        setTestData({ ...testData, duration_minutes: "" });
+                        return;
+                      }
+                      if (num < 1) num = 1;
+                      if (num > 240) num = 240;
+                      setTestData({ ...testData, duration_minutes: num });
+                    }}
                     className="mt-2 mb-2"
                   />
                 </div>
@@ -478,16 +675,25 @@ export default function CreateOnlineTest() {
                     id="attempts"
                     type="number"
                     min="1"
+                    max="999"
                     value={testData.max_attempts}
-                    onChange={(e) =>
-                      setTestData({
-                        ...testData,
-                        max_attempts:
-                          e.target.value === ""
-                            ? ""
-                            : e.target.value.replace(/^0+/, ""),
-                      })
-                    }
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        setTestData({ ...testData, max_attempts: "" });
+                        return;
+                      }
+ // strip leading zeros
+                      const cleaned = raw.replace(/^0+/, "");
+                      let num = parseInt(cleaned, 10);
+                      if (isNaN(num)) {
+                        setTestData({ ...testData, max_attempts: "" });
+                        return;
+                      }
+                      if (num < 1) num = 1;
+                      if (num > 999) num = 999;
+                      setTestData({ ...testData, max_attempts: num });
+                    }}
                     className="mt-2 mb-2"
                   />
                 </div>
@@ -509,6 +715,44 @@ export default function CreateOnlineTest() {
                   >
                     Show results immediately after submission
                   </Label>
+                </div>
+
+                {/* Publish checkbox: checked = publish now, unchecked = require schedule */}
+                <div className="mt-4">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="publishNow"
+                      checked={testData.publish_now}
+                      onCheckedChange={(checked) =>
+                        setTestData({ ...testData, publish_now: checked })
+                      }
+                    />
+                    <Label
+                      htmlFor="publishNow"
+                      className="text-sm cursor-pointer"
+                    >
+                      Publish now
+                    </Label>
+                  </div>
+
+                  {!testData.publish_now && (
+                    <div className="mt-3">
+                      <Label className="text-sm">
+                        Select publish date & time
+                      </Label>
+                      <Input
+                        type="datetime-local"
+                        value={testData.publish_at}
+                        onChange={(e) =>
+                          setTestData({
+                            ...testData,
+                            publish_at: e.target.value,
+                          })
+                        }
+                        className="w-auto mt-2"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Summary */}
@@ -543,18 +787,18 @@ export default function CreateOnlineTest() {
 
                 <Button
                   onClick={handleSubmit}
-                  disabled={loading || selectedQuestions.length === 0}
-                  className="w-full bg-blue-600 hover:bg-blue-700 mt-4"
+                  disabled={isCreating || selectedQuestions.length === 0}
+                  className="w-full bg-blue-600 hover:bg-blue-700 mt-4 cursor-pointer"
                 >
-                  {loading ? (
+                  {isCreating ? (
                     <>
                       <span className="animate-spin mr-2">⏳</span>
-                      Creating...
+                      {editId ? "Updating..." : "Creating..."}
                     </>
                   ) : (
                     <>
                       <Plus className="h-4 w-4 mr-2" />
-                      Create Online Test
+                      {editId ? "Update Online Test" : "Create Online Test"}
                     </>
                   )}
                 </Button>
@@ -570,7 +814,7 @@ export default function CreateOnlineTest() {
               </CardHeader>
               <CardContent className="p-6 space-y-5">
                 {/* Filters */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div>
                     <Label>Subject</Label>
                     <Select
@@ -644,9 +888,38 @@ export default function CreateOnlineTest() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  <div>
+                    <Label>Question Type</Label>
+                    <Select
+                      value={questionTypeFilter}
+                      onValueChange={(value) => setQuestionTypeFilter(value)}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="All types" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All types</SelectItem>
+                        <SelectItem value="MC">Multiple Choice</SelectItem>
+                        <SelectItem value="TFE">True/False</SelectItem>
+                        <SelectItem value="ORD">Ordering</SelectItem>
+                        <SelectItem value="FIB">Fill in the Blank</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
-                {/* ✅ Random Selection Feature */}
+                <div>
+                  <Label>Search questions</Label>
+                  <Input
+                    value={questionSearchTerm}
+                    onChange={(e) => setQuestionSearchTerm(e.target.value)}
+                    placeholder="Search by question text..."
+                    className="mt-2"
+                  />
+                </div>
+
+                {/*  Random Selection Feature */}
                 {selectedSection && questions.length > 0 && (
                   <div className="border-t pt-4">
                     <div className="flex items-center gap-3">
@@ -681,7 +954,7 @@ export default function CreateOnlineTest() {
                           <Button
                             type="button"
                             variant="ghost"
-                            className="mb-4 cursor-pointer bg-gray-100 hover:bg-gray-400"
+                            className="mb-4 cursor-pointer bg-gray-100 hover:bg-gray-200"
                             onClick={() => {
                               setShowRandomInput(false);
                               setRandomCount("");
@@ -701,17 +974,15 @@ export default function CreateOnlineTest() {
                     <BookOpen className="h-16 w-16 mx-auto mb-4 opacity-30" />
                     <p>Select a section to view questions</p>
                   </div>
-                ) : questions.length === 0 ? (
+                ) : filteredQuestions.length === 0 ? (
                   <div className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                    <p>No questions available in this section</p>
+                    <p>No questions match the current filters</p>
                   </div>
                 ) : (
                   <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                    {questions.map((question) => {
-                      const isSelected = selectedQuestions.some(
-                        (q) => q.id === question.id
-                      );
+                    {filteredQuestions.map((question) => {
+                      const isSelected = isQuestionSelected(question.id);
                       return (
                         <div
                           key={question.id}
@@ -736,7 +1007,7 @@ export default function CreateOnlineTest() {
                                 </p>
                                 <Badge
                                   className={getTypeColor(
-                                    question.question_type
+                                    question.question_type,
                                   )}
                                 >
                                   {question.question_type_display}
@@ -840,6 +1111,12 @@ export default function CreateOnlineTest() {
           )}
         </div>
       </div>
+      <Notification
+        show={notification.show}
+        message={notification.message}
+        type={notification.type}
+        onClose={() => setNotification({ ...notification, show: false })}
+      />
     </>
   );
 }

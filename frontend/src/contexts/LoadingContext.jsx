@@ -1,14 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useRef } from "react";
-
-/**
- * LoadingContext - Quản lý trạng thái loading toàn cục
- *
- * Đếm số lượng request đang active thay vì dùng boolean.
- * Cơ chế: mỗi request bắt đầu → +1, kết thúc → -1.
- * isLoading = true khi có ít nhất 1 request đang chạy.
- */
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
+import { wireLoadingInterceptors } from "@/services/api-client";
 
 const LoadingContext = createContext(null);
 
@@ -25,6 +18,11 @@ export function LoadingProvider({ children }) {
     countRef.current = Math.max(0, countRef.current - 1);
     setActiveRequests(countRef.current);
   }, []);
+
+  // Kết nối interceptors với apiClient
+  useEffect(() => {
+    wireLoadingInterceptors(startLoading, stopLoading);
+  }, [startLoading, stopLoading]);
 
   return (
     <LoadingContext.Provider

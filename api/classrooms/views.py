@@ -8,7 +8,8 @@ from django.db import IntegrityError
 from .models import Classroom, Student, EnrollmentRequest
 from .serializers import (
     ClassroomSerializer, ClassroomCreateSerializer, StudentSerializer,
-    AllClassroomSerializer, EnrollmentRequestSerializer, EnrollmentRequestActionSerializer
+    AllClassroomSerializer, EnrollmentRequestSerializer, EnrollmentRequestActionSerializer,
+    InvitationSerializer
 )
 from exam.models import PaperSubmission
 from django.shortcuts import get_object_or_404
@@ -46,7 +47,7 @@ class ClassroomViewSet(viewsets.ModelViewSet):
                 student.submission = submission
             students_data.append(student)
 
-        serializer = StudentSerializer(students_data, many=True)
+        serializer = StudentSerializer(students_data, many=True, context={'classroom_id': classroom.id})
         return Response(serializer.data, status=status.HTTP_200_OK)
     
 @api_view(['GET'])
@@ -90,6 +91,7 @@ def get_student_classroom_info(request):
                 teacher_info = {
                     'name': classroom.teacher.username,
                     'email': classroom.teacher.email or 'N/A',
+                    'avatar': classroom.teacher.avatar.url if classroom.teacher.avatar else None,
                 }
             
             classrooms_data.append({
@@ -126,63 +128,13 @@ def get_student_classroom_info(request):
             {'error': str(e)}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 class StudentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = StudentSerializer
 
     def get_queryset(self):
         return Student.objects.filter(classrooms__teacher=self.request.user).distinct()
-    
-    def perform_create(self, serializer):
-        classroom_id = self.request.data.get('classroom')
-        if not classroom_id:
-            raise serializers.ValidationError({"classroom": "Classroom ID is required."})
-        
-        classroom = get_object_or_404(Classroom, id=classroom_id)
-        if classroom.teacher != self.request.user:
-            raise serializers.ValidationError({"classroom": "You are not authorized to add students to this class."})
-        
-        name = self.request.data.get('name')
-        student_id = self.request.data.get('student_id')
-        password = self.request.data.get('password')
-        
-        if not name or not student_id:
-            raise serializers.ValidationError({
-                "name": "Name is required." if not name else None,
-                "student_id": "Student ID is required." if not student_id else None
-            })
-            
-        if not password:
-            raise serializers.ValidationError({
-                "password": "Password is required when creating a student."
-            })
-            
-        if len(password) < 6:
-            raise serializers.ValidationError({
-                "password": "Password must be at least 6 characters long."
-            })
-        
-        student = serializer.save()
-        student.classrooms.add(classroom)
-        
-        # Create user account
-        date_of_birth = self.request.data.get('date_of_birth')
-        student.create_user_account(raw_password=password, date_of_birth=date_of_birth)
-    
-    @action(detail=True, methods=['post'], url_path='add-to-classroom')
-    def add_to_classroom(self, request, pk=None):
-        student = self.get_object()
-        classroom_id = request.data.get('classroom_id')
-        
-        classroom = get_object_or_404(Classroom, id=classroom_id)
-        if classroom.teacher != request.user:
-            return Response(
-                {"error": "You don't have permission to add students to this classroom"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        student.classrooms.add(classroom)
-        return Response({"message": "Student added to classroom successfully"})
     
     @action(detail=True, methods=['post'], url_path='remove-from-classroom')
     def remove_from_classroom(self, request, pk=None):
@@ -198,10 +150,10 @@ class StudentViewSet(viewsets.ModelViewSet):
         
         student.classrooms.remove(classroom)
 
-        # Cleanup enrollment request row to allow future re-join requests
+        # Cleanup enrollment request rows to allow future re-join requests
         EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
         
-        # Nếu không còn lớp nào, có thể xóa student
+        # If student has no more classrooms, optionally delete
         if not student.classrooms.exists():
             student.delete()
             
@@ -234,7 +186,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         student.classrooms.remove(classroom)
 
-        # Cleanup enrollment request row to allow future re-join requests
+        # Cleanup enrollment request rows to allow future re-join requests
         EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
 
         return Response(
@@ -257,7 +209,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
 
 # ============================================
-# Enrollment Request Views
+# Enrollment Request Views (Student -> Teacher)
 # ============================================
 
 @api_view(['GET'])
@@ -276,12 +228,12 @@ def all_classrooms_list(request):
         enrolled_ids = set(student.classrooms.values_list('id', flat=True))
         pending_ids = set(
             EnrollmentRequest.objects.filter(
-                student=student, status='pending'
+                student=student, status='pending', request_type='student_request'
             ).values_list('classroom_id', flat=True)
         )
         rejected_ids = set(
             EnrollmentRequest.objects.filter(
-                student=student, status='rejected'
+                student=student, status='rejected', request_type='student_request'
             ).values_list('classroom_id', flat=True)
         )
         
@@ -332,7 +284,7 @@ def create_enrollment_request(request):
     
     # Check for existing pending request
     existing = EnrollmentRequest.objects.filter(
-        student=student, classroom=classroom
+        student=student, classroom=classroom, request_type='student_request'
     ).first()
     
     if existing:
@@ -352,13 +304,15 @@ def create_enrollment_request(request):
         enrollment_request = EnrollmentRequest.objects.create(
             student=student,
             classroom=classroom,
-            status='pending'
+            status='pending',
+            request_type='student_request'
         )
     except IntegrityError:
         # Safety net for race conditions / stale unique row
         existing = EnrollmentRequest.objects.filter(
             student=student,
-            classroom=classroom
+            classroom=classroom,
+            request_type='student_request'
         ).first()
         if existing:
             if existing.status != 'pending':
@@ -386,7 +340,7 @@ def get_enrollment_requests(request, classroom_id):
     
     status_filter = request.query_params.get('status', 'pending')
     requests_qs = EnrollmentRequest.objects.filter(
-        classroom=classroom, status=status_filter
+        classroom=classroom, status=status_filter, request_type='student_request'
     ).select_related('student', 'student__user')
     
     serializer = EnrollmentRequestSerializer(requests_qs, many=True)
@@ -449,6 +403,7 @@ def get_my_enrolled_classrooms(request):
             teacher_info = {
                 'name': classroom.teacher.username,
                 'email': classroom.teacher.email or 'N/A',
+                'avatar': classroom.teacher.avatar.url if classroom.teacher.avatar else None,
             }
         data.append({
             'id': classroom.id,
@@ -481,7 +436,157 @@ def get_enrollment_requests_count(request, classroom_id):
         )
     
     count = EnrollmentRequest.objects.filter(
-        classroom=classroom, status='pending'
+        classroom=classroom, status='pending', request_type='student_request'
     ).count()
     
     return Response({'count': count}, status=status.HTTP_200_OK)
+
+
+# ============================================
+# Teacher Invitation Views (Teacher -> Student)
+# ============================================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def invite_student(request, classroom_id):
+    """Teacher invites a student to join their classroom by email"""
+    classroom = get_object_or_404(Classroom, id=classroom_id)
+    
+    if classroom.teacher != request.user:
+        return Response(
+            {'error': 'You are not authorized to invite students to this classroom.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    email = request.data.get('email', '').strip().lower()
+    if not email:
+        return Response(
+            {'error': 'Email is required.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Find student by email
+    student = Student.objects.filter(user__email__iexact=email).select_related('user').first()
+    if not student:
+        return Response(
+            {'error': f'No student account found with email "{email}". The student must register first.'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Check if already a member
+    if classroom in student.classrooms.all():
+        return Response(
+            {'error': f'{student.name} is already a member of this classroom.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check for existing invitation
+    existing = EnrollmentRequest.objects.filter(
+        student=student, classroom=classroom, request_type='teacher_invitation'
+    ).first()
+    
+    if existing:
+        if existing.status == 'pending':
+            return Response(
+                {'error': f'An invitation is already pending for {student.name}.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        elif existing.status in ['rejected', 'approved']:
+            # Allow re-invitation
+            existing.status = 'pending'
+            existing.invited_by = request.user
+            existing.save()
+            return Response({
+                'message': f'Invitation re-sent to {student.name} ({email}).',
+            }, status=status.HTTP_200_OK)
+    
+    try:
+        EnrollmentRequest.objects.create(
+            student=student,
+            classroom=classroom,
+            status='pending',
+            request_type='teacher_invitation',
+            invited_by=request.user
+        )
+    except IntegrityError:
+        return Response(
+            {'error': 'An invitation already exists for this student.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    return Response({
+        'message': f'Invitation sent to {student.name} ({email}).',
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_invitations(request):
+    """Student fetches their pending teacher invitations"""
+    student = Student.objects.filter(user=request.user).first()
+    if not student:
+        return Response([], status=status.HTTP_200_OK)
+    
+    invitations = EnrollmentRequest.objects.filter(
+        student=student,
+        request_type='teacher_invitation',
+        status='pending'
+    ).select_related('classroom', 'classroom__teacher', 'invited_by')
+    
+    serializer = InvitationSerializer(invitations, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_invitations_count(request):
+    """Get count of pending teacher invitations for a student"""
+    student = Student.objects.filter(user=request.user).first()
+    if not student:
+        return Response({'count': 0}, status=status.HTTP_200_OK)
+    
+    count = EnrollmentRequest.objects.filter(
+        student=student,
+        request_type='teacher_invitation',
+        status='pending'
+    ).count()
+    
+    return Response({'count': count}, status=status.HTTP_200_OK)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def handle_invitation(request, invitation_id):
+    """Student accepts or rejects a teacher invitation"""
+    invitation = get_object_or_404(EnrollmentRequest, id=invitation_id, request_type='teacher_invitation')
+    
+    # Verify the invitation belongs to the current student
+    student = Student.objects.filter(user=request.user).first()
+    if not student or invitation.student != student:
+        return Response(
+            {'error': 'You are not authorized to handle this invitation.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    action_serializer = EnrollmentRequestActionSerializer(data=request.data)
+    action_serializer.is_valid(raise_exception=True)
+    
+    action = action_serializer.validated_data['action']
+    
+    if action == 'approve':
+        invitation.status = 'approved'
+        invitation.save()
+        # Add student to classroom
+        student.classrooms.add(invitation.classroom)
+        return Response({
+            'message': f'You have joined {invitation.classroom.name}.',
+            'status': 'approved'
+        }, status=status.HTTP_200_OK)
+    
+    elif action == 'reject':
+        invitation.status = 'rejected'
+        invitation.save()
+        return Response({
+            'message': f'You have declined the invitation to {invitation.classroom.name}.',
+            'status': 'rejected'
+        }, status=status.HTTP_200_OK)

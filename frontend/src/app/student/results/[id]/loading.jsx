@@ -28,8 +28,10 @@ export default function ResultsLoading() {
       </div>
 
       {/* Content skeleton */}
-      <div className="flex items-center justify-center p-4 min-h-[calc(100vh-200px)]">
-        <div className="max-w-md w-full">
+      <div className="pt-16 pb-12 px-4 max-w-4xl mx-auto space-y-12">
+        <CardSkeleton />
+        <div className="space-y-10 mt-10">
+          <CardSkeleton />
           <CardSkeleton />
         </div>
       </div>

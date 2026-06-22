@@ -9,8 +9,9 @@ class User(AbstractUser):
     #     ('student', 'Student'),
     # ]
 
-    username = models.CharField(max_length=150,unique=True, null=True, blank=True)
+    username = models.CharField(max_length=150, unique=True, null=True, blank=True)
     email = models.EmailField(max_length=255, unique=True, db_index= True, blank=True, null = True)
+    full_name = models.CharField(max_length=255, null=True, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     GENDER_CHOICES = [
@@ -20,6 +21,7 @@ class User(AbstractUser):
     ]
     gender = models.CharField(max_length=10, choices = GENDER_CHOICES, null=True, blank=True)
     is_authorized = models.BooleanField(default=False)
+    avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
     # class Meta:
     #     db_table = 'users'
     #     managed = True

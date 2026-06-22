@@ -1,0 +1,113 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor #FFFFCC
+    BorderColor #333333
+    ArrowColor #333333
+}
+
+package "pkg Manage Classrooms" {
+
+    ' =================== BOUNDARY ===================
+    class ClassroomManagementView <<boundary>> {
+        + createClassroom(data : Object) : void
+        + updateClassroom(classroomId : int, data : Object) : void
+        + deleteClassroom(classroomId : int) : void
+        + viewStudents(classroomId : int) : void
+        + addStudent(classroomId : int, studentData : Object) : void
+        + removeStudent(classroomId : int, studentId : int) : void
+        + deleteStudent(studentId : int) : void
+    }
+
+    class EnrollmentRequestView <<boundary>> {
+        + viewEnrollmentRequests(classroomId : int) : void
+        + approveRequest(requestId : int) : void
+        + rejectRequest(requestId : int) : void
+        + inviteStudent(classroomId : int, email : String) : void
+        + getEnrollmentRequestsCount(classroomId : int) : void
+    }
+
+    class StudentClassroomView <<boundary>> {
+        + browseAllClassrooms() : void
+        + requestEnrollment(classroomId : int) : void
+        + viewMyClassrooms() : void
+        + viewMyInvitations() : void
+        + acceptInvitation(invitationId : int) : void
+        + rejectInvitation(invitationId : int) : void
+        + leaveClassroom(classroomId : int) : void
+    }
+
+    ' =================== CONTROL ===================
+    class ClassroomController <<control>> {
+        - apiClient : AxiosInstance
+        + getAllClassrooms() : List
+        + getClassroomById(classroomId : int) : Classroom
+        + createClassroom(data : Object) : Classroom
+        + updateClassroom(classroomId : int, data : Object) : Classroom
+        + deleteClassroom(classroomId : int) : void
+        + getStudents(classroomId : int) : List
+        + addStudent(classroomId : int, studentData : Object) : Student
+        + deleteStudent(studentId : int) : void
+        + removeStudentFromClassroom(classroomId : int, studentId : int) : void
+        + getAllAvailableClassrooms() : List
+        + requestEnrollment(classroomId : int) : Object
+        + getEnrollmentRequests(classroomId : int, status : String) : List
+        + getEnrollmentRequestsCount(classroomId : int) : int
+        + handleEnrollmentRequest(requestId : int, action : String) : Object
+        + getMyEnrolledClassrooms() : Object
+        + getStudentClassrooms(studentId : int) : Object
+        + inviteStudent(classroomId : int, email : String) : Object
+        + getMyInvitations() : List
+        + getMyInvitationsCount() : int
+        + handleInvitation(invitationId : int, action : String) : Object
+    }
+
+    ' =================== ENTITY ===================
+    class Classroom <<entity>> {
+        - id : int
+        - name : String
+        - description : String
+        - teacher_id : int
+        - created_at : DateTime
+    }
+
+    class Student <<entity>> {
+        - id : int
+        - name : String
+        - student_id : String
+        - user_id : int
+        - created_at : DateTime
+        + create_user_account(password : String, dateOfBirth : Date, email : String) : User
+        + average_score() : float
+        + get_classroom_average_score(classroomId : int) : float
+    }
+
+    class EnrollmentRequest <<entity>> {
+        - id : int
+        - student_id : int
+        - classroom_id : int
+        - status : String
+        - request_type : String
+        - invited_by_id : int
+        - created_at : DateTime
+        - updated_at : DateTime
+    }
+
+    ' =================== RELATIONSHIPS ===================
+    ' Boundary --> Control (Dependency)
+    ClassroomManagementView ..> ClassroomController
+    EnrollmentRequestView ..> ClassroomController
+    StudentClassroomView ..> ClassroomController
+
+    ' Control --> Entity (Dependency)
+    ClassroomController ..> Classroom
+    ClassroomController ..> Student
+    ClassroomController ..> EnrollmentRequest
+
+    ' Entity --> Entity (Association)
+    Classroom "1" *-- "*" EnrollmentRequest
+    Student "1" *-- "*" EnrollmentRequest
+    Classroom "*" -- "*" Student : enrolled in
+}
+
+@enduml

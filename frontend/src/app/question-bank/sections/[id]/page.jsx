@@ -31,6 +31,8 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Search,
   Upload,
   Filter,
@@ -43,6 +45,7 @@ import {
 } from "lucide-react";
 import DeleteConfirmButton from "@/components/common/DeleteConfirmButton";
 import QuestionDetailContent from "@/components/questions/QuestionDetailContent";
+import Notification from "@/components/common/Notification";
 
 const QUESTION_TYPES = [
   { value: "ALL", label: "All Types" },
@@ -61,20 +64,35 @@ export default function SectionQuestions({ params }) {
   const [expandedQuestionId, setExpandedQuestionId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
 
-  // Search & Filter states
+ // Search & Filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("ALL");
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 20;
 
-  // Upload states
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
+
+ // Upload states
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState(null);
 
-  // Delete states
+ // Delete states
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  
+ // Warning Modal state
+  const [warningModal, setWarningModal] = useState({ open: false, message: "", questionId: null, isBulk: false });
+
+  const [notification, setNotification] = useState({ show: false, message: "", type: "success" });
+
+  const showNotification = (message, type = "success") => {
+    setNotification({ show: true, message, type });
+  };
 
   useEffect(() => {
     loadQuestions();
@@ -86,7 +104,7 @@ export default function SectionQuestions({ params }) {
       const response = await QuestionBankService.getSectionQuestions(id);
       setQuestions(response.data);
 
-      // Get section info from first question or fetch separately
+ // Get section info from first question or fetch separately
       if (response.data.length > 0) {
         const firstQuestion = response.data[0];
         setSectionInfo({
@@ -102,7 +120,6 @@ export default function SectionQuestions({ params }) {
     }
   };
 
-  // Client-side filtering with useMemo for performance
   const filteredQuestions = useMemo(() => {
     return questions.filter((q) => {
       const matchesSearch =
@@ -114,13 +131,33 @@ export default function SectionQuestions({ params }) {
     });
   }, [questions, searchTerm, filterType]);
 
+  const totalPages = Math.ceil(filteredQuestions.length / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const currentQuestions = filteredQuestions.slice(
+    startIndex,
+    startIndex + rowsPerPage
+  );
+
+  // Auto-adjust pagination when items are deleted
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
   const handleDelete = async (questionId) => {
     try {
       await QuestionBankService.deleteQuestion(questionId);
+      showNotification("Question deleted successfully!");
       loadQuestions();
     } catch (error) {
-      alert("Failed to delete question: " + error.message);
-      throw error;
+      if (error.response?.status === 409) {
+         setWarningModal({ open: true, message: error.response.data.error, questionId, isBulk: false });
+      } else if (error.response?.status === 400 && error.response?.data?.error) {
+         showNotification(error.response.data.error, "error");
+      } else {
+         showNotification("Failed to delete question: " + error.message, "error");
+      }
     }
   };
 
@@ -152,17 +189,42 @@ export default function SectionQuestions({ params }) {
         await QuestionBankService.bulkDeleteQuestions(selectedIds);
       }
       setSelectedIds([]);
+      showNotification("Selected questions deleted successfully!");
       await loadQuestions();
     } catch (error) {
+      if (error.response?.status === 409) {
+         setWarningModal({ open: true, message: error.response.data.error, questionId: null, isBulk: true });
+         return;
+      }
       const msg =
         error.response?.data?.error ||
         error.message ||
         "Failed to delete questions";
       setDeleteError(msg);
-      throw error; // Rethrow for DeleteConfirmButton to handle loading state
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const confirmForceDelete = async () => {
+      try {
+          if (warningModal.isBulk) {
+            if (selectedIds.length === 1) {
+              await QuestionBankService.deleteQuestion(selectedIds[0], true);
+            } else {
+              await QuestionBankService.bulkDeleteQuestions(selectedIds, true);
+            }
+            setSelectedIds([]);
+            showNotification("Selected questions deleted successfully!");
+          } else {
+            await QuestionBankService.deleteQuestion(warningModal.questionId, true);
+            showNotification("Question deleted successfully!");
+          }
+          setWarningModal({ open: false, message: "", questionId: null, isBulk: false });
+          loadQuestions();
+      } catch (err) {
+         showNotification("Force delete failed: " + err.message, "error");
+      }
   };
 
   const handleUpload = async () => {
@@ -173,21 +235,46 @@ export default function SectionQuestions({ params }) {
       setUploadError(null);
       setUploadResult(null);
 
+ // We'll use the API directly here to handle the specific errors for this dialog
       const formData = new FormData();
       formData.append("file", uploadFile);
       formData.append("section_id", id);
 
+ // Client-side file size validation (10MB)
+      const MAX_FILE_SIZE = 10 * 1024 * 1024;
+      if (uploadFile.size > MAX_FILE_SIZE) {
+        throw new Error(`File size exceeds 10MB limit. Please use a smaller file.`);
+      }
+
       const response = await QuestionBankService.uploadQuestions(formData);
       setUploadResult(response.data);
-
-      // Reload questions
-      await loadQuestions();
-    } catch (error) {
-      const msg =
-        error.response?.data?.error ||
-        error.response?.data?.details?.join(", ") ||
-        error.message;
-      setUploadError(msg);
+      
+      if (response.data.created_count > 0) {
+        showNotification(response.data.message || "Questions uploaded successfully!");
+        await loadQuestions();
+      }
+    } catch (err) {
+      let errorMsg;
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        errorMsg = "Upload timed out. The file may be too large or the server is busy.";
+      } else if (err.response?.data) {
+        const data = err.response.data;
+        errorMsg = data.error || data.detail || "Failed to upload questions";
+        
+ // Show structured error results even on failure
+        setUploadResult({
+          created_count: 0,
+          skipped_count: 0,
+          validation_errors: data.validation_errors || [],
+          errors: data.errors || [],
+          message: errorMsg,
+        });
+      } else {
+        errorMsg = err.message || "Failed to upload questions";
+      }
+      
+      setUploadError(errorMsg);
+      showNotification("Failed to upload questions: " + errorMsg, "error");
     } finally {
       setUploading(false);
     }
@@ -276,6 +363,15 @@ export default function SectionQuestions({ params }) {
                       className="bg-red-500/80 hover:bg-red-600 text-white border border-red-400/50 cursor-pointer h-10 px-4 text-sm"
                     />
                   )}
+                  <Button
+                    onClick={() => {
+                      window.dispatchEvent(new Event('navigation-start')),
+                      router.push(`/question-bank/sections/${id}/trash`)}}
+                    className="bg-white/20 hover:bg-white/30 text-white border border-white/30 cursor-pointer px-3"
+                    title="Trash"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                   <Button
                     onClick={() => setIsUploadOpen(true)}
                     className="bg-white/20 hover:bg-white/30 text-white border border-white/30 cursor-pointer"
@@ -380,6 +476,7 @@ export default function SectionQuestions({ params }) {
                   </p>
                 </div>
               ) : (
+                <>
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
@@ -409,7 +506,7 @@ export default function SectionQuestions({ params }) {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredQuestions.map((question, index) => {
+                      {currentQuestions.map((question, index) => {
                         const isExpanded = expandedQuestionId === question.id;
                         const isSelected = selectedIds.includes(question.id);
 
@@ -443,7 +540,7 @@ export default function SectionQuestions({ params }) {
                                 </div>
                               </TableCell>
                               <TableCell className="text-gray-400 font-mono text-sm">
-                                {index + 1}
+                                {startIndex + index + 1}
                               </TableCell>
                               <TableCell className="max-w-md">
                                 <div className="line-clamp-2">
@@ -496,6 +593,35 @@ export default function SectionQuestions({ params }) {
                     </TableBody>
                   </Table>
                 </div>
+                
+                {totalPages > 1 && (
+                  <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+                    <Button
+                      onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                      variant="outline"
+                      className="gap-1 text-sm cursor-pointer"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <div className="flex items-center">
+                      <span className="text-sm text-gray-600 font-medium">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                    </div>
+                    <Button
+                      onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage >= totalPages}
+                      variant="outline"
+                      className="gap-1 text-sm cursor-pointer"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -520,36 +646,74 @@ export default function SectionQuestions({ params }) {
             )}
           </DialogHeader>
 
-          {uploadError && (
+          {uploadError && !uploadResult && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{uploadError}</AlertDescription>
             </Alert>
           )}
 
+          {/* Upload Result Display */}
           {uploadResult && (
-            <div className="space-y-3">
-              <Alert className="bg-green-50 border-green-200">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800">
-                  {uploadResult.message}
-                </AlertDescription>
-              </Alert>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-blue-50 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-blue-700">
-                    {uploadResult.created_count}
-                  </p>
-                  <p className="text-xs text-blue-600">Created</p>
+            <div className="space-y-4">
+              {/* Stats */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 bg-green-50 rounded-lg text-center border border-green-200">
+                  <p className="text-2xl font-bold text-green-700">{uploadResult.created_count || 0}</p>
+                  <p className="text-xs text-green-600">Created</p>
                 </div>
-                <div className="p-3 bg-amber-50 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-amber-700">
-                    {uploadResult.skipped_count || 0}
+                <div className="p-3 bg-amber-50 rounded-lg text-center border border-amber-200">
+                  <p className="text-2xl font-bold text-amber-700">{uploadResult.skipped_count || 0}</p>
+                  <p className="text-xs text-amber-600">Duplicates</p>
+                </div>
+                <div className="p-3 bg-red-50 rounded-lg text-center border border-red-200">
+                  <p className="text-2xl font-bold text-red-700">
+                    {(uploadResult.validation_errors?.length || 0) + (uploadResult.errors?.length || 0)}
                   </p>
-                  <p className="text-xs text-amber-600">Skipped (Duplicates)</p>
+                  <p className="text-xs text-red-600">Errors</p>
                 </div>
               </div>
+
+              {/* Validation Errors */}
+              {uploadResult.validation_errors?.length > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 space-y-2">
+                  <h4 className="text-sm font-semibold text-red-800">
+                    ️ Validation Errors ({uploadResult.validation_errors.length})
+                  </h4>
+                  <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {uploadResult.validation_errors.map((err, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-red-700 bg-white rounded px-3 py-2 border border-red-100">
+                        <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                        <span>{err.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Processing Errors */}
+              {uploadResult.errors?.length > 0 && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-4 space-y-2">
+                  <h4 className="text-sm font-semibold text-orange-800">
+                    Processing Errors ({uploadResult.errors.length})
+                  </h4>
+                  <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {uploadResult.errors.map((err, i) => (
+                      <li key={i} className="text-xs text-orange-700 bg-white rounded px-3 py-2 border border-orange-100">
+                        {typeof err === 'string' ? err : err.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {uploadResult.created_count > 0 && (
+                <Alert className="bg-green-50 border-green-200">
+                  <AlertDescription className="text-green-800 text-sm">
+                     {uploadResult.message || `${uploadResult.created_count} question(s) created successfully!`}
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
 
@@ -564,13 +728,12 @@ export default function SectionQuestions({ params }) {
                   onChange={(e) => setUploadFile(e.target.files[0])}
                   className="cursor-pointer mt-1"
                 />
-                <p className="text-sm text-gray-500 mt-2">
-                  📝 Supported formats: English & Vietnamese
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  🔄 Duplicate questions will be automatically detected and
-                  skipped
-                </p>
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-gray-500"> Formats: English & Vietnamese auto-detected</p>
+                  <p className="text-xs text-gray-500"> Max size: 10MB</p>
+                  <p className="text-xs text-gray-500">️ Images in Word are supported (placed after question, before options)</p>
+                  <p className="text-xs text-gray-400"> Duplicate questions will be automatically skipped</p>
+                </div>
               </div>
             </div>
           )}
@@ -601,6 +764,44 @@ export default function SectionQuestions({ params }) {
                 )}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Notification
+        show={notification.show}
+        message={notification.message}
+        type={notification.type}
+        onClose={() => setNotification({ ...notification, show: false })}
+      />
+
+      {/* Force Delete Warning Modal */}
+      <Dialog open={warningModal.open} onOpenChange={(open) => !open && setWarningModal({ ...warningModal, open: false })}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" />
+              Warning
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-700">{warningModal.message}</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWarningModal({ ...warningModal, open: false })}
+              className="cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmForceDelete}
+              className="cursor-pointer"
+            >
+              Confirm Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

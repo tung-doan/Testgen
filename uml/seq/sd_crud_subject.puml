@@ -1,0 +1,50 @@
+@startuml
+title SD CRUD Subject
+
+actor ": Teacher" as User
+
+boundary ": SubjectChapterView" as View
+control ": QuestionBankController" as Controller
+entity ": Subject" as Subject
+entity ": Chapter" as Chapter
+entity ": Section" as Section
+
+' ===== 1. Teacher mở màn hình Ngân hàng câu hỏi =====
+User -> View : 1: selectQuestionBankFeat() : void
+View -> Controller : 1.1: getAllSubjects() : List
+Controller -> Subject : 1.1.1: findAll() : List
+Controller <-- Subject
+View <-- Controller
+User <-- View : 1.1.2: display() : void
+
+' ===== 2. Tạo Môn học mới =====
+User -> View : 2: addSubject(name : String) : void
+View -> Controller : 2.1: createSubject(data : Object) : Subject
+Controller -> Subject : 2.1.1: <<create>>\ncreateSubject()
+activate Subject
+Controller <-- Subject
+deactivate Subject
+View <-- Controller
+User <-- View : 2.1.2: display() : void
+
+' ===== 3. Tạo Chương trong Môn học =====
+User -> View : 3: addChapter(subjectId : int, name : String, order : int) : void
+View -> Controller : 3.1: createChapter(data : Object) : Chapter
+Controller -> Chapter : 3.1.1: <<create>>\ncreateChapter()
+activate Chapter
+Controller <-- Chapter
+deactivate Chapter
+View <-- Controller
+User <-- View : 3.1.2: display() : void
+
+' ===== 4. Tạo Mục trong Chương =====
+User -> View : 4: addSection(chapterId : int, name : String, order : int) : void
+View -> Controller : 4.1: createSection(data : Object) : Section
+Controller -> Section : 4.1.1: <<create>>\ncreateSection()
+activate Section
+Controller <-- Section
+deactivate Section
+View <-- Controller
+User <-- View : 4.1.2: display() : void
+
+@enduml

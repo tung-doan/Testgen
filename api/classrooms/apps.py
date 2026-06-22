@@ -6,6 +6,4 @@ class ClassroomsConfig(AppConfig):
     name = "classrooms"
 
     def ready(self):
-        if 'runserver' in sys.argv:
-            from .scheduler import start
-            start()
+        pass

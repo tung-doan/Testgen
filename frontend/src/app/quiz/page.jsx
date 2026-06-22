@@ -21,6 +21,14 @@ import TestService from "@/services/test.service";
 import { usePrefetch } from "@/hooks/usePrefetch";
 import { Download, Plus, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import DeleteConfirmButton from "@/components/common/DeleteConfirmButton";
+import Notification from "@/components/common/Notification";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function TestSummary() {
   const router = useRouter();
@@ -28,9 +36,19 @@ export default function TestSummary() {
   const { prefetch } = usePrefetch();
   const [tests, setTests] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
   const [currentPage, setCurrentPage] = useState(1);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [notification, setNotification] = useState({
+    show: false,
+    message: "",
+    type: "success",
+  });
   const rowsPerPage = 20;
+
+  const showNotification = (message, type = "success") => {
+    setNotification({ show: true, message, type });
+  };
 
   useEffect(() => {
     setCurrentPage(1);
@@ -87,9 +105,10 @@ export default function TestSummary() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      showNotification("Variants downloaded successfully!");
     } catch (err) {
       console.error("Error downloading variants:", err);
-      alert(err.message || "Failed to download variants");
+      showNotification(err.message || "Failed to download variants", "error");
     } finally {
       setDownloadingId(null);
     }
@@ -99,21 +118,35 @@ export default function TestSummary() {
     try {
       await deleteTest(testId);
       setTests((prev) => prev.filter((t) => t.id !== testId));
+      showNotification("Test deleted successfully!");
     } catch (err) {
       console.error("Error deleting test:", err);
-      alert(err.message || "Failed to delete test");
+      showNotification(err.message || "Failed to delete test", "error");
       throw err;
     }
   };
 
   // Filter and Pagination
-  const filteredTests = tests.filter((test) =>
-    test.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredTests = tests
+    .filter((test) =>
+      test.title.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      const dateA = new Date(a.created_at || 0);
+      const dateB = new Date(b.created_at || 0);
+      return sortBy === "newest" ? dateB - dateA : dateA - dateB;
+    });
   
   const totalPages = Math.ceil(filteredTests.length / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentTests = filteredTests.slice(startIndex, startIndex + rowsPerPage);
+
+  // Auto-adjust pagination when items are deleted
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
 
   const maxPagesToShow = 5;
   let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
@@ -132,6 +165,12 @@ export default function TestSummary() {
     <>
       <Header />
       <Navbar />
+      <Notification
+        show={notification.show}
+        message={notification.message}
+        type={notification.type}
+        onClose={() => setNotification({ ...notification, show: false })}
+      />
       <div className="min-h-screen flex items-start justify-center bg-gradient-to-br from-green-100 to-green-200 p-6 pt-10">
         <Card className="!p-0 w-full max-w-7xl shadow-2xl border-0 rounded-xl overflow-hidden">
           <CardHeader className="bg-gradient-to-r from-green-600 to-emerald-700 text-white rounded-t-xl px-8 py-5 flex flex-row justify-between items-center">
@@ -153,15 +192,27 @@ export default function TestSummary() {
           </CardHeader>
           
           {/* Search Filter */}
-          <div className="p-4 border-b border-gray-100 bg-white">
-            <div className="relative max-w-md">
+          <div className="p-4 border-b border-gray-100 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="relative max-w-md w-full">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search tests by name..."
-                className="pl-10"
+                className="pl-10 w-full"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-600">Sort by:</span>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="w-auto bg-white border-gray-200 text-gray-700 font-medium hover:bg-gray-50 focus:ring-2 focus:ring-green-500/20">
+                  <SelectValue placeholder="Sort order" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border border-gray-100 shadow-lg rounded-md">
+                  <SelectItem value="newest" className="cursor-pointer">Newest</SelectItem>
+                  <SelectItem value="oldest" className="cursor-pointer">Oldest</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -261,7 +312,7 @@ export default function TestSummary() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50 hover:text-green-800 text-xs px-3 py-1.5 h-8 transition-all duration-150"
+                                  className="gap-1.5 text-green-700 border-green-300 hover:bg-green-50 hover:text-green-800 text-xs px-3 py-1.5 h-8 transition-all duration-150 cursor-pointer"
                                   disabled={downloadingId === test.id}
                                   onClick={(e) =>
                                     handleDownloadAll(e, test.id, test.title)
@@ -320,7 +371,7 @@ export default function TestSummary() {
                       onClick={() =>
                         setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                       }
-                      disabled={currentPage === totalPages}
+                      disabled={currentPage >= totalPages}
                       variant="outline"
                       className="gap-1 text-sm"
                     >
@@ -342,4 +393,4 @@ export default function TestSummary() {
       </div>
     </>
   );
-}
+} 

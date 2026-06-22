@@ -29,9 +29,12 @@ export function useSubmission() {
       setError(null);
       setUploadProgress(0);
 
-      const data = await SubmissionService.uploadBatchSubmission(formData, (pct) => {
-        setUploadProgress(pct);
-      });
+      const data = await SubmissionService.uploadBatchSubmission(
+        formData,
+        (pct) => {
+          setUploadProgress(pct);
+        },
+      );
       return data;
     } catch (err) {
       setError(err.message);
@@ -47,7 +50,10 @@ export function useSubmission() {
       try {
         setLoading(true);
         setError(null);
-        const data = await SubmissionService.getSubmissionSummary(testId, studentId);
+        const data = await SubmissionService.getSubmissionSummary(
+          testId,
+          studentId,
+        );
         return data;
       } catch (err) {
         setError(err.message);

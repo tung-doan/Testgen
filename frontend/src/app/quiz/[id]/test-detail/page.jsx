@@ -27,6 +27,7 @@ export default function TestDetailPage() {
   const [test, setTest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedQuestionId, setExpandedQuestionId] = useState(null);
+  const [selectedVariantCode, setSelectedVariantCode] = useState("original");
 
   useEffect(() => {
     loadTestData();
@@ -45,6 +46,17 @@ export default function TestDetailPage() {
   };
 
   const paperQuestions = test?.paper_questions || [];
+  
+  const selectedVariant = test?.variants?.find((v) => v.variant_code === selectedVariantCode);
+
+  const displayQuestions = [...paperQuestions];
+  if (selectedVariant) {
+    displayQuestions.sort((a, b) => {
+      const indexA = selectedVariant.question_order.indexOf(a.question);
+      const indexB = selectedVariant.question_order.indexOf(b.question);
+      return indexA - indexB;
+    });
+  }
 
   if (loading) return <TestDetailLoading />;
 
@@ -74,9 +86,29 @@ export default function TestDetailPage() {
           {/* Questions List */}
           <Card className="border-0 shadow-xl !p-0">
             <CardHeader className="border-b bg-gray-50">
-              <CardTitle className="flex items-center gap-2 p-2">
-                Questions ({test?.num_questions || 0})
-              </CardTitle>
+              <div className="flex items-center justify-between p-2 flex-wrap gap-4">
+                <CardTitle className="flex items-center gap-2">
+                  Questions ({test?.num_questions || 0})
+                </CardTitle>
+                
+                {test?.variants && test.variants.length > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-600">Sort by Variant:</span>
+                    <select
+                      value={selectedVariantCode}
+                      onChange={(e) => setSelectedVariantCode(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-4 py-2 bg-white text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 text-sm font-medium cursor-pointer"
+                    >
+                      <option value="original">Original Order (Default)</option>
+                      {test.variants.map((v) => (
+                        <option key={v.id} value={v.variant_code}>
+                          Variant {v.variant_code}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-6">
               {test?.paper_questions?.length === 0 ? (
@@ -96,10 +128,18 @@ export default function TestDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paperQuestions.map((pq) => {
+                    {displayQuestions.map((pq, index) => {
                       const detail = pq.question_detail || pq.question;
                       const isExpanded = expandedQuestionId === pq.id;
                       const optionsCount = detail?.options?.length || 0;
+
+                      let questionOptions = detail?.options || [];
+                      if (selectedVariant && selectedVariant.answer_shuffles) {
+                        const shuffleOrder = selectedVariant.answer_shuffles[String(detail.id)];
+                        if (shuffleOrder) {
+                          questionOptions = shuffleOrder.map((idx) => questionOptions[idx]).filter(Boolean);
+                        }
+                      }
 
                       return (
                         <Fragment key={pq.id}>
@@ -112,8 +152,8 @@ export default function TestDetailPage() {
                             }
                           >
                             <TableCell>
-                              <Badge className="bg-blue-100 text-blue-800">
-                                {pq.order}
+                              <Badge className={selectedVariant ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}>
+                                {selectedVariant ? index + 1 : pq.order}
                               </Badge>
                             </TableCell>
                             <TableCell className="max-w-md">
@@ -141,7 +181,7 @@ export default function TestDetailPage() {
                           {isExpanded && (
                             <TableRow>
                               <TableCell colSpan={4} className="bg-gray-50">
-                                <QuestionDetailContent question={detail} />
+                                <QuestionDetailContent question={{ ...detail, options: questionOptions }} />
                               </TableCell>
                             </TableRow>
                           )}

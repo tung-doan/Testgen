@@ -29,15 +29,29 @@ export default function HistoryLoading() {
 
       {/* Content skeleton */}
       <div className="py-8 px-4 max-w-7xl mx-auto space-y-6">
-        <CardSkeleton />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
+        {/* Page Header skeleton */}
+        <div className="w-full shadow-xl border-0 rounded-xl overflow-hidden bg-white mb-4">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-5 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-lg animate-pulse" />
+              <div>
+                <div className="h-8 w-48 bg-white/20 rounded animate-pulse" />
+                <div className="h-4 w-64 bg-white/10 rounded mt-2 animate-pulse" />
+              </div>
+            </div>
+            <div className="h-10 w-28 bg-white/20 rounded-full animate-pulse" />
+          </div>
         </div>
-        <div className="bg-white rounded-xl shadow-lg p-0 border overflow-hidden mt-6">
-          <div className="h-16 bg-gradient-to-r from-gray-50 to-gray-100 border-b opacity-50"></div>
+
+        {/* Exam List skeleton */}
+        <div className="w-full shadow-xl border-0 rounded-xl overflow-hidden bg-white">
+          <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="h-7 w-48 bg-gray-200 rounded animate-pulse" />
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-full md:w-64 bg-white rounded-md border border-gray-200 animate-pulse" />
+              <div className="h-9 w-24 bg-white rounded-md border border-gray-200 animate-pulse" />
+            </div>
+          </div>
           <div className="p-6">
             <TableSkeleton rows={5} cols={5} />
           </div>

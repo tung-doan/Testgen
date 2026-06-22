@@ -48,13 +48,13 @@ export default function QuestionDetailContent({ question }) {
       {question.image && (
         <div>
           <h3 className="font-semibold mb-2">Image:</h3>
-          <Image
-            src={question.image}
-            alt="Question"
-            width={400}
-            height={300}
-            className="rounded border"
-          />
+          <div className="relative w-full max-w-2xl rounded overflow-hidden border border-gray-200">
+            <img
+              src={question.image}
+              alt="Question Image"
+              className="w-full h-auto object-contain"
+            />
+          </div>
         </div>
       )}
 

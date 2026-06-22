@@ -21,6 +21,7 @@ import CreateTestLoading from "./loading";
 import { useQuestionBank } from "@/hooks/useQuestionBank";
 import { useClassroom } from "@/hooks/useClassroom";
 import { useTest } from "@/hooks/useTest";
+import Notification from "@/components/common/Notification";
 import {
   FileText,
   BookOpen,
@@ -50,8 +51,19 @@ export default function CreatePaperTest() {
 
   const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [notification, setNotification] = useState({
+    show: false,
+    message: "",
+    type: "success",
+  });
 
-  // Form data
+  const showNotification = (message, type = "success") => {
+    setNotification({ show: true, message, type });
+  };
+
+ // Form data
   const [testData, setTestData] = useState({
     title: "",
     description: "",
@@ -61,30 +73,33 @@ export default function CreatePaperTest() {
     num_variants: 1,
   });
 
-  // Question Bank data
+ // Question Bank data
   const [subjects, setSubjects] = useState([]);
   const [chapters, setChapters] = useState([]);
   const [sections, setSections] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
 
-  // Selected filters
+ // Selected filters
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
 
-  // Selected questions
+ // Selected questions
   const [selectedQuestions, setSelectedQuestions] = useState([]);
 
-  // Random selection
+ // Question search filter
+  const [questionSearchTerm, setQuestionSearchTerm] = useState("");
+
+ // Random selection
   const [randomCount, setRandomCount] = useState("");
   const [showRandomInput, setShowRandomInput] = useState(false);
 
-  // PDF Preview
+ // PDF Preview
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Load initial data
+ // Load initial data
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -120,6 +135,7 @@ export default function CreatePaperTest() {
       setClassrooms(classroomsData);
     } catch (err) {
       console.error("Error loading data:", err);
+      showNotification("Failed to load initial data", "error");
       setError("Failed to load initial data");
     } finally {
       setPageLoading(false);
@@ -147,8 +163,8 @@ export default function CreatePaperTest() {
   const loadQuestions = async (sectionId) => {
     try {
       const data = await fetchQuestions({ section_id: sectionId });
-      // ✅ CHỈ LẤY MC (bao gồm cả 1 và nhiều đáp án)
-      const mcQuestions = data.filter((q) => q.question_type === "MC");
+ // CHỈ LẤY MC VÀ CÓ ĐÚNG 4 ĐÁP ÁN (Dành cho thi giấy OMR)
+      const mcQuestions = data.filter((q) => q.question_type === "MC" && q.option_count === 4);
       setQuestions(mcQuestions);
     } catch (err) {
       console.error("Error loading questions:", err);
@@ -170,52 +186,98 @@ export default function CreatePaperTest() {
   };
 
   const handleToggleQuestion = (question) => {
-    const isSelected = selectedQuestions.some((q) => q.id === question.id);
-    if (isSelected) {
-      setSelectedQuestions(
-        selectedQuestions.filter((q) => q.id !== question.id),
+    setSelectedQuestions((currentSelectedQuestions) => {
+      const isSelected = currentSelectedQuestions.some(
+        (q) => String(q.id) === String(question.id),
       );
-    } else {
-      setSelectedQuestions([...selectedQuestions, question]);
-    }
+      if (isSelected) {
+        return currentSelectedQuestions.filter(
+          (q) => String(q.id) !== String(question.id),
+        );
+      }
+      return [...currentSelectedQuestions, question];
+    });
   };
 
   const handleRandomSelect = () => {
     const count = parseInt(randomCount);
+
     if (!count || count < 1) {
-      setError("Please enter a valid number");
-      return;
-    }
-    if (count > questions.length) {
-      setError(`Only ${questions.length} questions available`);
+      showNotification("Please enter a valid number", "error");
       return;
     }
 
-    const currentSectionIds = new Set(questions.map((q) => q.id));
-    const questionsFromOther = selectedQuestions.filter(
-      (q) => !currentSectionIds.has(q.id),
+ // Calculate available questions (not already selected) from current section
+    const currentSelectedIds = new Set(
+      selectedQuestions.map((q) => String(q.id)),
     );
 
-    const shuffled = [...questions].sort(() => Math.random() - 0.5);
-    const randomQuestions = shuffled.slice(0, count);
+    const availableQuestions = questions.filter(
+      (q) => !currentSelectedIds.has(String(q.id)),
+    );
 
-    setSelectedQuestions([...questionsFromOther, ...randomQuestions]);
+ // If all questions in section are already selected
+    if (availableQuestions.length === 0) {
+      showNotification(
+        "All questions in this section are already selected",
+        "info",
+      );
+      setRandomCount("");
+      setShowRandomInput(false);
+      return;
+    }
+
+ // Calculate actual count to add (min of requested or available)
+    const actualCount = Math.min(count, availableQuestions.length);
+
+ // Shuffle and select from available questions
+    const shuffled = [...availableQuestions].sort(() => Math.random() - 0.5);
+    const randomQuestions = shuffled.slice(0, actualCount);
+
+ // Update state by merging new questions with existing
+    setSelectedQuestions((currentSelectedQuestions) => [
+      ...currentSelectedQuestions,
+      ...randomQuestions,
+    ]);
+
+ // Show smart notification
+    if (count > availableQuestions.length) {
+      showNotification(
+        `Only ${availableQuestions.length} question(s) available in this section. Added all ${actualCount} question(s).`,
+        "warning",
+      );
+    } else {
+      showNotification(`Added ${actualCount} question(s)`, "success");
+    }
+
     setRandomCount("");
     setShowRandomInput(false);
     setError(null);
   };
 
   const handleRemoveQuestion = (questionId) => {
-    setSelectedQuestions(selectedQuestions.filter((q) => q.id !== questionId));
+    setSelectedQuestions((currentSelectedQuestions) =>
+      currentSelectedQuestions.filter(
+        (q) => String(q.id) !== String(questionId),
+      ),
+    );
   };
+
+  const filteredQuestions = questions.filter((question) =>
+    question.prompt.toLowerCase().includes(questionSearchTerm.toLowerCase()),
+  );
+
+  const isQuestionSelected = (questionId) =>
+    selectedQuestions.some((q) => String(q.id) === String(questionId));
 
   const handlePreview = async () => {
     if (selectedQuestions.length === 0) {
-      setError("Please select at least one question");
+      showNotification("Please select at least one question", "error");
       return;
     }
 
     try {
+      setIsPreviewing(true);
       const payload = {
         title: testData.title || "Preview Test",
         num_choices: parseInt(testData.num_choices),
@@ -229,7 +291,10 @@ export default function CreatePaperTest() {
       setError(null);
     } catch (err) {
       console.error("Error generating preview:", err);
+      showNotification(err.message || "Failed to generate preview", "error");
       setError(err.message || "Failed to generate preview");
+    } finally {
+      setIsPreviewing(false);
     }
   };
 
@@ -237,21 +302,23 @@ export default function CreatePaperTest() {
     setError(null);
 
     if (!testData.title) {
-      setError("Test title is required");
+      showNotification("Test title is required", "error");
       return;
     }
 
     if (selectedQuestions.length === 0) {
-      setError("Please select at least one question");
+      showNotification("Please select at least one question", "error");
       return;
     }
 
-    if (testData.num_variants < 1 || testData.num_variants > 10) {
-      setError("Number of variants must be between 1 and 10");
+    const numVariants = parseInt(testData.num_variants) || 1;
+    if (numVariants < 1 || numVariants > 20) {
+      showNotification("Number of variants must be between 1 and 20", "error");
       return;
     }
 
     try {
+      setIsCreating(true);
       const payload = {
         title: testData.title,
         description: testData.description,
@@ -259,16 +326,21 @@ export default function CreatePaperTest() {
         num_questions: selectedQuestions.length,
         num_choices: parseInt(testData.num_choices),
         allow_multiple_answers: testData.allow_multiple_answers,
-        num_variants: parseInt(testData.num_variants), 
+        num_variants: numVariants,
         questions: selectedQuestions.map((q) => q.id),
       };
 
       await createTest(payload);
-      alert("Paper test created successfully!");
-      router.push("/quiz");
+      showNotification("Paper test created successfully!", "success");
+      setTimeout(() => {
+        router.push("/quiz");
+      }, 1500);
     } catch (err) {
       console.error("Error creating test:", err);
+      showNotification(err.message || "Failed to create test", "error");
       setError(err.message || "Failed to create test");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -305,7 +377,7 @@ export default function CreatePaperTest() {
                   </div>
                 </div>
                 <Button
-                className="bg-white text-green-700 hover:bg-green-50"
+                  className="bg-white text-green-700 hover:bg-green-50 cursor-pointer"
                   onClick={() => {
                     window.dispatchEvent(new Event("navigation-start"));
                     router.push("/quiz");
@@ -322,8 +394,9 @@ export default function CreatePaperTest() {
           <Alert className="mb-6 border-blue-200 bg-blue-50">
             <Info className="h-4 w-4 text-blue-600" />
             <AlertDescription className="text-blue-800">
-              <strong>Note:</strong> Paper tests support Multiple Choice questions. 
-              You can create multiple test variants with different question orders and shuffled answer choices.
+              <strong>Note:</strong> Paper tests support Multiple Choice
+              questions. You can create multiple test variants with different
+              question orders and shuffled answer choices.
             </AlertDescription>
           </Alert>
 
@@ -354,7 +427,7 @@ export default function CreatePaperTest() {
                       setTestData({ ...testData, title: e.target.value })
                     }
                     placeholder="e.g., Mid-term Exam 2024"
-                    className="mt-2"
+                    className="mt-2 mb-2"
                   />
                 </div>
 
@@ -368,12 +441,12 @@ export default function CreatePaperTest() {
                       setTestData({ ...testData, description: e.target.value })
                     }
                     placeholder="Brief description"
-                    className="mt-2"
+                    className="mt-2 mb-2"
                   />
                 </div>
 
                 {/* Classroom */}
-                <div>
+                <div className="mt-2 mb-2">
                   <Label htmlFor="classroom">Class (Optional)</Label>
                   <Select
                     value={testData.classroom_id?.toString() || "none"}
@@ -401,48 +474,37 @@ export default function CreatePaperTest() {
                   </Select>
                 </div>
 
-                {/* Number of Choices */}
-                <div>
-                  <Label htmlFor="num_choices">Number of Choices</Label>
-                  <Input
-                    id="num_choices"
-                    type="number"
-                    min="2"
-                    max="6"
-                    value={testData.num_choices}
-                    onChange={(e) =>
-                      setTestData({
-                        ...testData,
-                        num_choices: parseInt(e.target.value) || 4,
-                      })
-                    }
-                    className="mt-2"
-                  />
-                </div>
+
 
                 {/* NUMBER OF VARIANTS */}
                 <div>
-                  <Label htmlFor="num_variants" className="flex items-center gap-2">
-                    <Copy className="h-4 w-4 text-purple-600" />
+                  <Label
+                    htmlFor="num_variants"
+                    className="flex items-center gap-2"
+                  >
                     Number of Test Variants
                   </Label>
                   <Input
                     id="num_variants"
                     type="number"
                     min="1"
-                    max="10"
                     value={testData.num_variants}
                     onChange={(e) =>
                       setTestData({
                         ...testData,
-                        num_variants: parseInt(e.target.value) || 1,
+                        num_variants:
+                          e.target.value === ""
+                            ? ""
+                            : e.target.value.replace(/^0+/, ""),
                       })
                     }
                     className="mt-2"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    System will create {testData.num_variants} {testData.num_variants === 1 ? 'version' : 'versions'} 
-                    {testData.num_variants > 1 && ' (A, B, C...)'} with shuffled questions and answers
+                    System will create {testData.num_variants || 1}{" "}
+                    {(testData.num_variants || 1) == 1 ? "version" : "versions"}
+                    {(testData.num_variants || 1) > 1 && " (A, B, C...)"} with
+                    shuffled questions and answers
                   </p>
                 </div>
 
@@ -460,25 +522,15 @@ export default function CreatePaperTest() {
                       <span className="text-gray-600">
                         Choices per Question:
                       </span>
-                      <span className="font-semibold">
-                        {testData.num_choices}
-                      </span>
-                    </div>
-                    {/* ✅ MULTIPLE ANSWERS DISPLAY */}
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Multiple Answer Qs:</span>
-                      <span className="font-semibold text-purple-600">
-                        {
-                          selectedQuestions.filter(
-                            (q) => q.has_multiple_correct_answers,
-                          ).length
-                        }
+                      <span className="font-semibold text-emerald-600">
+                        4 (Standard OMR)
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Test Variants:</span>
                       <span className="font-semibold text-indigo-600">
-                        {testData.num_variants} {testData.num_variants === 1 ? 'variant' : 'variants'}
+                        {testData.num_variants}{" "}
+                        {testData.num_variants === 1 ? "variant" : "variants"}
                       </span>
                     </div>
                   </div>
@@ -488,18 +540,28 @@ export default function CreatePaperTest() {
                 <div className="space-y-3 pt-3">
                   <Button
                     onClick={handlePreview}
-                    disabled={loading || selectedQuestions.length === 0}
-                    className="w-full bg-blue-600 hover:bg-blue-700 mb-2"
+                    disabled={
+                      isCreating ||
+                      isPreviewing ||
+                      selectedQuestions.length === 0
+                    }
+                    className="w-full bg-blue-600 hover:bg-blue-700 mb-2 cursor-pointer"
                   >
                     <Eye className="h-4 w-4 mr-2" />
-                    {loading ? "Generating..." : "Preview Test"}
+                    {isPreviewing ? "Generating..." : "Preview Test"}
                   </Button>
                   <Button
                     onClick={handleSubmit}
-                    disabled={loading || selectedQuestions.length === 0}
-                    className="w-full bg-green-600 hover:bg-green-700"
+                    disabled={
+                      isCreating ||
+                      isPreviewing ||
+                      selectedQuestions.length === 0
+                    }
+                    className="w-full bg-green-600 hover:bg-green-700 cursor-pointer"
                   >
-                    {loading ? "Creating..." : `Create Test${testData.num_variants > 1 ? ` (${testData.num_variants} Variants)` : ''}`}
+                    {isCreating
+                      ? "Creating..."
+                      : `Create Test${(parseInt(testData.num_variants) || 1) > 1 ? ` (${testData.num_variants} Variants)` : ""}`}
                   </Button>
                 </div>
               </CardContent>
@@ -593,9 +655,19 @@ export default function CreatePaperTest() {
                   </div>
                 </div>
 
+                <div>
+                  <Label>Search questions</Label>
+                  <Input
+                    value={questionSearchTerm}
+                    onChange={(e) => setQuestionSearchTerm(e.target.value)}
+                    placeholder="Search by question text..."
+                    className="mt-2"
+                  />
+                </div>
+
                 {/* Random Selection */}
                 {selectedSection && questions.length > 0 && (
-                  <div className="border-t pt-4">
+                  <div className="border-t pt-4 mb-2">
                     <div className="flex items-center gap-3">
                       <Button
                         type="button"
@@ -621,13 +693,14 @@ export default function CreatePaperTest() {
                           <Button
                             type="button"
                             onClick={handleRandomSelect}
-                            className="bg-purple-600 hover:bg-purple-700"
+                            className="bg-purple-600 hover:bg-purple-700 cursor-pointer"
                           >
                             Add Random
                           </Button>
                           <Button
                             type="button"
                             variant="ghost"
+                            className="bg-gray-100 hover:bg-gray-200 cursor-pointer"
                             onClick={() => {
                               setShowRandomInput(false);
                               setRandomCount("");
@@ -647,19 +720,15 @@ export default function CreatePaperTest() {
                     <BookOpen className="h-16 w-16 mx-auto mb-4 opacity-30" />
                     <p>Select a section to view Multiple Choice questions</p>
                   </div>
-                ) : questions.length === 0 ? (
+                ) : filteredQuestions.length === 0 ? (
                   <div className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                    <p>
-                      No Multiple Choice questions available in this section
-                    </p>
+                    <p>No questions match the current search</p>
                   </div>
                 ) : (
                   <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                    {questions.map((question) => {
-                      const isSelected = selectedQuestions.some(
-                        (q) => q.id === question.id,
-                      );
+                    {filteredQuestions.map((question) => {
+                      const isSelected = isQuestionSelected(question.id);
                       const hasMultipleAnswers =
                         question.has_multiple_correct_answers;
 
@@ -681,7 +750,7 @@ export default function CreatePaperTest() {
                                   <p className="font-medium">
                                     {question.prompt}
                                   </p>
-                                  {/* ✅ MULTIPLE ANSWERS NOTE */}
+                                  {/*  MULTIPLE ANSWERS NOTE */}
                                   {hasMultipleAnswers && (
                                     <div className="flex items-center gap-1 mt-2 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-md w-fit">
                                       <CheckSquare className="h-3 w-3" />
@@ -712,9 +781,9 @@ export default function CreatePaperTest() {
 
           {/* Selected Questions Preview */}
           {selectedQuestions.length > 0 && (
-            <Card className="border-0 shadow-lg">
-              <CardHeader className="border-b bg-gradient-to-r from-green-50 to-emerald-50">
-                <CardTitle className="flex items-center gap-2">
+            <Card className="border-0 shadow-lg !p-0">
+              <CardHeader className="border-b bg-gradient-to-r from-green-200 to-emerald-400 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 p-2">
                   <CheckCircle className="h-5 w-5 text-green-600" />
                   Selected Questions ({selectedQuestions.length})
                 </CardTitle>
@@ -737,7 +806,7 @@ export default function CreatePaperTest() {
                           <div className="flex items-start justify-between gap-2 mb-2">
                             <div className="flex-1">
                               <p className="font-medium">{question.prompt}</p>
-                              {/* ✅ NOTE */}
+                              {/*  NOTE */}
                               {hasMultipleAnswers && (
                                 <div className="flex items-center gap-1 mt-2 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-md w-fit">
                                   <CheckSquare className="h-3 w-3" />
@@ -807,6 +876,12 @@ export default function CreatePaperTest() {
           )}
         </div>
       </div>
+      <Notification
+        show={notification.show}
+        message={notification.message}
+        type={notification.type}
+        onClose={() => setNotification({ ...notification, show: false })}
+      />
     </>
   );
 }

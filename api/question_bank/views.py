@@ -2,7 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Count
 from .models import Subject, Chapter, Section, Question, AnswerOption
 from .serializers import (
     SubjectSerializer, ChapterSerializer, 
@@ -20,7 +20,9 @@ class SubjectViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        return Subject.objects.filter(created_by=self.request.user).prefetch_related('chapters')
+        return Subject.objects.filter(created_by=self.request.user).annotate(
+            chapter_count=Count('chapters', distinct=True)
+        )
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -29,7 +31,9 @@ class SubjectViewSet(viewsets.ModelViewSet):
     def chapters(self, request, pk=None):
         """Lấy danh sách chương của môn học"""
         subject = self.get_object()
-        chapters = subject.chapters.all().prefetch_related('sections')
+        chapters = subject.chapters.all().select_related('subject').annotate(
+            section_count=Count('sections', distinct=True)
+        )
         serializer = ChapterSerializer(chapters, many=True)
         return Response(serializer.data)
 
@@ -46,13 +50,17 @@ class ChapterViewSet(viewsets.ModelViewSet):
         if subject_id:
             queryset = queryset.filter(subject_id=subject_id)
         
-        return queryset.select_related('subject').prefetch_related('sections')
+        return queryset.select_related('subject').annotate(
+            section_count=Count('sections', distinct=True)
+        )
     
     @action(detail=True, methods=['get'])
     def sections(self, request, pk=None):
         """Lấy danh sách mục của chương"""
         chapter = self.get_object()
-        sections = chapter.sections.all().prefetch_related('questions')
+        sections = chapter.sections.all().select_related('chapter__subject').annotate(
+            question_count=Count('questions', filter=Q(questions__is_active=True))
+        )
         serializer = SectionSerializer(sections, many=True)
         return Response(serializer.data)
 
@@ -69,13 +77,23 @@ class SectionViewSet(viewsets.ModelViewSet):
         if chapter_id:
             queryset = queryset.filter(chapter_id=chapter_id)
         
-        return queryset.select_related('chapter__subject')
+        return queryset.select_related('chapter__subject').annotate(
+            question_count=Count('questions', filter=Q(questions__is_active=True))
+        )
     
     @action(detail=True, methods=['get'])
     def questions(self, request, pk=None):
         """Lấy danh sách câu hỏi của mục"""
         section = self.get_object()
         questions = section.questions.filter(is_active=True).prefetch_related('options')
+        serializer = QuestionDetailSerializer(questions, many=True)
+        return Response(serializer.data)
+        
+    @action(detail=True, methods=['get'])
+    def deleted_questions(self, request, pk=None):
+        """Lấy danh sách câu hỏi đã xóa (is_active=False) của mục"""
+        section = self.get_object()
+        questions = section.questions.filter(is_active=False).prefetch_related('options')
         serializer = QuestionDetailSerializer(questions, many=True)
         return Response(serializer.data)
 
@@ -124,98 +142,134 @@ class QuestionViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='upload-questions')
     def upload_questions(self, request):
-        """Upload file Word chứa câu hỏi"""
-        print(f"[upload_questions] Starting upload from {request.user}")
+        """Upload file Word chứa câu hỏi - with comprehensive validation"""
+        import zipfile
         
         file = request.FILES.get('file')
         section_id = request.data.get('section_id')
         
-        print(f"[upload_questions] File: {file}, Section ID: {section_id}")
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
         
-        # Validation
+        # ── File validation ──
         if not file:
             return Response(
-                {"error": "File is required"}, 
+                {"error": "File is required", "error_type": "no_file"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if file.size == 0:
+            return Response(
+                {"error": "File is empty (0 bytes)", "error_type": "empty_file"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if file.size > MAX_FILE_SIZE:
+            size_mb = round(file.size / (1024 * 1024), 1)
+            return Response(
+                {
+                    "error": f"File size ({size_mb}MB) exceeds the {MAX_FILE_SIZE // (1024*1024)}MB limit",
+                    "error_type": "file_too_large"
+                }, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if not file.name.endswith('.docx'):
             return Response(
-                {"error": "File must be .docx format"}, 
+                {
+                    "error": f"Invalid file format: '{file.name}'. Only .docx files are accepted",
+                    "error_type": "invalid_format"
+                }, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Verify actual file content is a valid ZIP (docx = ZIP with XML)
+        file.seek(0)
+        if not zipfile.is_zipfile(file):
+            file.seek(0)
+            return Response(
+                {
+                    "error": "File content is not a valid .docx document. "
+                             "The file may be corrupted or is not a real Word document",
+                    "error_type": "invalid_content"
+                }, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        file.seek(0)
         
         if not section_id:
             return Response(
-                {"error": "section_id is required"}, 
+                {"error": "section_id is required", "error_type": "missing_section"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Check section exists and belongs to user
+        # ── Section validation ──
         try:
             section = Section.objects.select_related('chapter__subject').get(
                 id=section_id,
                 chapter__subject__created_by=request.user
             )
-            print(f"[upload_questions] Section found: {section.name}")
         except Section.DoesNotExist:
             return Response(
-                {"error": "Section not found or you don't have permission"}, 
+                {"error": "Section not found or you don't have permission", "error_type": "section_not_found"}, 
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Create temporary directory
+        # ── Process file ──
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, 'uploaded_questions.docx')
         
         try:
-            # Save uploaded file
             with open(temp_file_path, 'wb+') as destination:
                 for chunk in file.chunks():
                     destination.write(chunk)
             
-            print(f"[upload_questions] File saved to: {temp_file_path}")
-            print(f"[upload_questions] File exists: {os.path.exists(temp_file_path)}")
-            print(f"[upload_questions] File size: {os.path.getsize(temp_file_path)} bytes")
-            
-            # Process immediately (synchronously for debugging)
             result = process_word_document(temp_file_path, section, request.user)
-            
-            print(f"[upload_questions] Upload result: {result}")
             
             # Cleanup
             try:
                 shutil.rmtree(temp_dir)
-                print(f"[upload_questions] Temp directory deleted")
-            except Exception as e:
-                print(f"[upload_questions] Error deleting temp dir: {e}")
+            except Exception:
+                pass
             
+            # ── Build response ──
             if result['success']:
+                message = f"Successfully created {result['created_count']} question(s)"
+                if result['skipped_count'] > 0:
+                    message += f", skipped {result['skipped_count']} duplicate(s)"
+                if result['validation_errors']:
+                    message += f", {len(result['validation_errors'])} question(s) had errors"
+                
                 return Response(
                     {
-                        "message": f"Successfully created {result['created_count']} questions" + 
-                                   (f", skipped {result['skipped_count']} duplicates" if result['skipped_count'] > 0 else ""),
+                        "message": message,
                         "section_id": section_id,
                         "section_name": section.name,
                         "language": result['language'],
                         "created_count": result['created_count'],
                         "skipped_count": result.get('skipped_count', 0),
                         "skipped_duplicates": result.get('skipped_duplicates', []),
-                        "errors": result['errors']
+                        "validation_errors": result.get('validation_errors', []),
+                        "errors": result.get('errors', []),
                     }, 
                     status=status.HTTP_201_CREATED
                 )
             else:
+                # All questions failed
+                all_errors = result.get('validation_errors', []) + result.get('errors', [])
+                error_messages = [e['message'] for e in all_errors] if all_errors else ["Failed to process questions"]
+                
                 return Response(
                     {
                         "error": "Failed to process questions",
-                        "details": result['errors']
+                        "error_type": "processing_failed",
+                        "details": error_messages,
+                        "validation_errors": result.get('validation_errors', []),
+                        "errors": result.get('errors', []),
                     }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
         except Exception as e:
-            # Cleanup on error
             try:
                 shutil.rmtree(temp_dir)
             except:
@@ -226,7 +280,10 @@ class QuestionViewSet(viewsets.ModelViewSet):
             traceback.print_exc()
             
             return Response(
-                {"error": f"Critical error: {str(e)}"}, 
+                {
+                    "error": f"Critical error processing file: {str(e)}",
+                    "error_type": "critical"
+                }, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -278,21 +335,46 @@ class QuestionViewSet(viewsets.ModelViewSet):
         serializer = QuestionDetailSerializer(new_question)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
-    @action(detail=True, methods=['delete'])
-    def soft_delete(self, request, pk=None):
-        """Soft delete câu hỏi"""
-        question = self.get_object()
-        question.is_active = False
-        question.save()
-        return Response(
-            {"message": "Question deleted"},
-            status=status.HTTP_204_NO_CONTENT
-        )
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Check if question is used in exams
+        exams = instance.exams.all()
+        published_exams = exams.filter(is_published=True)
+        
+        if published_exams.exists():
+            exam_titles = ", ".join([e.title for e in published_exams])
+            return Response(
+                {"error": f"This question is currently used in the published exam '{exam_titles}'. Please close the exam before deleting this question."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        scheduled_exams = exams.filter(is_published=False)
+        if scheduled_exams.exists() and request.query_params.get('force') != 'true':
+            exam_titles = ", ".join([e.title for e in scheduled_exams])
+            return Response(
+                {"error": f"This question is currently used in the scheduled exam '{exam_titles}'. Are you sure you want to continue? The question will be removed from this exam."},
+                status=status.HTTP_409_CONFLICT
+            )
+            
+        # If force=true, remove from ExamQuestion
+        if scheduled_exams.exists() and request.query_params.get('force') == 'true':
+            from online_exams.models import ExamQuestion
+            ExamQuestion.objects.filter(question=instance).delete()
+            
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def perform_destroy(self, instance):
+        """Soft delete instead of standard database delete"""
+        instance.is_active = False
+        instance.save()
     
     @action(detail=False, methods=['post'], url_path='bulk-delete')
     def bulk_delete(self, request):
         """Bulk soft delete nhiều câu hỏi cùng lúc"""
         question_ids = request.data.get('question_ids', [])
+        force = request.data.get('force', False)
         
         if not question_ids:
             return Response(
@@ -306,21 +388,48 @@ class QuestionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get all questions that belong to user
+        # Get all questions that belong to user (prefetch exams to avoid N+1)
         questions = Question.objects.filter(
             section__chapter__subject__created_by=request.user,
             id__in=question_ids,
             is_active=True
-        )
+        ).prefetch_related('exams')
+        
+        if not questions.exists():
+            return Response(
+                {"error": "No questions found to delete"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check for exams
+        published_exams = set()
+        scheduled_exams = set()
+        for q in questions:
+            for exam in q.exams.all():
+                if exam.is_published:
+                    published_exams.add(exam.title)
+                else:
+                    scheduled_exams.add(exam.title)
+                    
+        if published_exams:
+            titles = ", ".join(published_exams)
+            return Response(
+                {"error": f"Some questions are used in published exams ({titles}). Please close these exams before deleting."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        if scheduled_exams and str(force).lower() != 'true':
+            titles = ", ".join(scheduled_exams)
+            return Response(
+                {"error": f"Some questions are used in scheduled exams ({titles}). Are you sure you want to continue? The questions will be removed from these exams."},
+                status=status.HTTP_409_CONFLICT
+            )
+            
+        if scheduled_exams and str(force).lower() == 'true':
+            from online_exams.models import ExamQuestion
+            ExamQuestion.objects.filter(question__in=questions).delete()
         
         deleted_count = questions.count()
-        
-        if deleted_count == 0:
-            return Response(
-                {"message": "No questions found to delete", "deleted_count": 0},
-                status=status.HTTP_200_OK
-            )
-        
         # Soft delete
         questions.update(is_active=False)
         
@@ -331,3 +440,39 @@ class QuestionViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        """Khôi phục câu hỏi đã xóa"""
+        try:
+            # Bypass get_queryset() which filters is_active=True
+            question = Question.objects.get(
+                pk=pk, 
+                section__chapter__subject__created_by=request.user,
+                is_active=False
+            )
+            question.is_active = True
+            question.save()
+            return Response({"message": "Question restored successfully"}, status=status.HTTP_200_OK)
+        except Question.DoesNotExist:
+            return Response(
+                {"error": "Question not found or already active"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['delete'])
+    def permanent_delete(self, request, pk=None):
+        """Xóa vĩnh viễn câu hỏi đã nằm trong thùng rác"""
+        try:
+            question = Question.objects.get(
+                pk=pk, 
+                section__chapter__subject__created_by=request.user,
+                is_active=False
+            )
+            question.delete()
+            return Response({"message": "Question permanently deleted"}, status=status.HTTP_204_NO_CONTENT)
+        except Question.DoesNotExist:
+            return Response(
+                {"error": "Question not found or not in trash"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )

@@ -19,7 +19,7 @@ export default function PendingTests() {
   const [studentId, setStudentId] = useState(null);
   const [error, setError] = useState(null);
 
-  // Dialog state
+ // Dialog state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedExam, setSelectedExam] = useState(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -27,11 +27,11 @@ export default function PendingTests() {
   useEffect(() => {
     const studentData = JSON.parse(localStorage.getItem("student") || "{}");
 
-    console.log("📌 Student data from localStorage:", studentData);
+    console.log(" Student data from localStorage:", studentData);
 
     const actualStudentId = studentData.id;
 
-    console.log("📌 Using student ID:", actualStudentId);
+    console.log(" Using student ID:", actualStudentId);
 
     if (actualStudentId) {
       setStudentId(actualStudentId);
@@ -46,13 +46,13 @@ export default function PendingTests() {
 
   const fetchPendingExams = async (id) => {
     try {
-      console.log("🔍 Fetching pending exams for student ID:", id);
+      console.log(" Fetching pending exams for student ID:", id);
       const data = await getPendingExams(id);
-      console.log("✅ Received pending exams:", data);
+      console.log(" Received pending exams:", data);
       setPendingExams(data || []);
       setError(null);
     } catch (err) {
-      console.error("❌ Error fetching pending exams:", err);
+      console.error(" Error fetching pending exams:", err);
       setError(err.message || "Failed to load pending exams");
     }
   };
@@ -60,6 +60,14 @@ export default function PendingTests() {
   const handleOpenDialog = (exam) => {
     setSelectedExam(exam);
     setIsDialogOpen(true);
+  };
+
+ // Navigate directly to in-progress exam without showing dialog
+  const handleContinueExam = (exam) => {
+    if (exam.in_progress_attempt_id) {
+      window.dispatchEvent(new Event("navigation-start"));
+      router.push(`/student/exam/${exam.in_progress_attempt_id}`);
+    }
   };
 
   const handleCloseDialog = () => {
@@ -79,21 +87,21 @@ export default function PendingTests() {
       setIsStarting(true);
       window.dispatchEvent(new Event("navigation-start"));
       console.log(
-        "🚀 Starting exam:",
+        " Starting exam:",
         selectedExam.id,
         "for student:",
         studentId,
       );
 
       const attempt = await startExam(selectedExam.id, studentId);
-      console.log("✅ Attempt created:", attempt);
+      console.log(" Attempt created:", attempt);
 
       const attemptId = attempt.attempt_id || attempt.id;
 
-      // Redirect to exam page
+ // Redirect to exam page
       router.push(`/student/exam/${attemptId}`);
     } catch (err) {
-      console.error("❌ Error starting exam:", err);
+      console.error(" Error starting exam:", err);
       setIsStarting(false);
       setIsDialogOpen(false);
       alert(`Failed to start exam: ${err.message}`);
@@ -163,6 +171,7 @@ export default function PendingTests() {
                   key={exam.id}
                   exam={exam}
                   onStartExam={handleOpenDialog}
+                  onContinueExam={handleContinueExam}
                   loading={loading}
                 />
               ))}

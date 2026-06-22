@@ -30,6 +30,9 @@ class Student(models.Model):
         if date_of_birth is not None:
             user.date_of_birth = date_of_birth
 
+        # Sync full name to first_name
+        user.first_name = self.name
+
         if raw_password:
             user.set_password(raw_password)
 
@@ -47,11 +50,37 @@ class Student(models.Model):
 
     @property
     def average_score(self):
-        from exam.models import PaperSubmission  # tránh import vòng
-        submissions = PaperSubmission.objects.filter(student=self)
-        scores = [s.total_score for s in submissions if s.total_score is not None]
-        if scores:
-            return round(sum(scores) / len(scores), 2)
+        from exam.models import PaperSubmission
+        from online_exams.models import ExamAttempt
+        
+        # Get paper test scores
+        paper_submissions = PaperSubmission.objects.filter(student=self)
+        paper_scores = [s.total_score for s in paper_submissions if s.total_score is not None]
+        
+        # Get online exam scores (completed only)
+        online_attempts = ExamAttempt.objects.filter(student=self, status='COMPLETED')
+        online_scores = [a.final_score for a in online_attempts if a.final_score is not None]
+        
+        all_scores = paper_scores + online_scores
+        if all_scores:
+            return round(sum(all_scores) / len(all_scores), 2)
+        return None
+
+    def get_classroom_average_score(self, classroom_id):
+        from exam.models import PaperSubmission
+        from online_exams.models import ExamAttempt
+        
+        # Get paper test scores for this classroom
+        paper_submissions = PaperSubmission.objects.filter(student=self, test__classroom_id=classroom_id)
+        paper_scores = [s.total_score for s in paper_submissions if s.total_score is not None]
+        
+        # Get online exam scores for this classroom
+        online_attempts = ExamAttempt.objects.filter(student=self, exam__classroom_id=classroom_id, status='COMPLETED')
+        online_scores = [a.final_score for a in online_attempts if a.final_score is not None]
+        
+        all_scores = paper_scores + online_scores
+        if all_scores:
+            return round(sum(all_scores) / len(all_scores), 2)
         return None
     
     def __str__(self):
@@ -65,15 +94,23 @@ class EnrollmentRequest(models.Model):
         ('rejected', 'Rejected'),
     ]
 
+    REQUEST_TYPE_CHOICES = [
+        ('student_request', 'Student Request'),
+        ('teacher_invitation', 'Teacher Invitation'),
+    ]
+
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='enrollment_requests')
     classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE, related_name='enrollment_requests')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    request_type = models.CharField(max_length=20, choices=REQUEST_TYPE_CHOICES, default='student_request')
+    invited_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='sent_invitations')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('student', 'classroom')
+        unique_together = ('student', 'classroom', 'request_type')
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.student.name} -> {self.classroom.name} ({self.status})"
+        type_label = 'invited' if self.request_type == 'teacher_invitation' else 'requested'
+        return f"{self.student.name} -> {self.classroom.name} ({type_label}, {self.status})"

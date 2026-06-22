@@ -1,11 +1,30 @@
 """
 Utility functions for processing Word documents containing questions
 Supports both English and Vietnamese formats
+With validation, error reporting, and image extraction
 """
 import docx
 import re
 import hashlib
+import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from django.db import transaction
 from question_bank.models import Question, AnswerOption
+
+try:
+    from docx.oxml.ns import qn
+except ImportError:
+    qn = None
+
+try:
+    import cloudinary.uploader
+    HAS_CLOUDINARY = True
+except ImportError:
+    HAS_CLOUDINARY = False
+
+
+MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 def normalize_text(text):
@@ -25,52 +44,28 @@ def compute_fingerprint(prompt, options_texts):
     raw = f"{normalized_prompt}|{'|'.join(normalized_options)}"
     return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
+
+def upload_image_to_cloudinary(image_blob, content_type='image/png'):
+    """Upload image bytes to Cloudinary and return URL."""
+    if not HAS_CLOUDINARY:
+        print("[Cloudinary] cloudinary package not available, skipping image upload")
+        return None
+    try:
+        result = cloudinary.uploader.upload(
+            io.BytesIO(image_blob),
+            folder="question_bank",
+            resource_type="image",
+        )
+        return result.get('secure_url')
+    except Exception as e:
+        print(f"[Cloudinary] Upload failed: {e}")
+        return None
+
+
 class WordQuestionParser:
     """
     Parser for Word documents containing questions.
-    
-    Supported formats:
-    
-    === ENGLISH FORMAT ===
-    
-    1. Multiple Choice:
-    Question 1: What is the capital of Vietnam?
-    A. Hanoi
-    B. Ho Chi Minh City
-    C. Da Nang
-    D. Hai Phong
-    ANSWER: A
-    
-    OR with multiple correct answers:
-    Question 2: Which are prime numbers?
-    A. 2
-    B. 3
-    C. 4
-    D. 5
-    ANSWER: A, B, D
-    
-    2. True/False Extended:
-    Question 3: Evaluate the following statements as True or False:
-    1. The sun rises in the East
-    2. The Earth is square
-    3. Water boils at 100°C
-    4. Humans have 4 legs
-    ANSWER: 1-T, 2-F, 3-T, 4-F
-    
-    3. Ordering:
-    Question 4: Arrange the seasons in order:
-    A. Autumn
-    B. Spring
-    C. Summer
-    D. Winter
-    CORRECT ORDER: B, C, A, D
-    
-    4. Fill in the Blank:
-    Question 5: The capital of France is _____?
-    ANSWER: Paris
-    
-    === VIETNAMESE FORMAT ===
-    (Original format as before)
+    Supports English and Vietnamese formats with image extraction.
     """
     
     # English patterns
@@ -94,13 +89,13 @@ class WordQuestionParser:
     TRUE_FALSE_KEYWORDS_EN = ['true/false', 'true or false', 'evaluate', 't/f']
     TRUE_FALSE_KEYWORDS_VI = ['đúng/sai', 'đánh giá']
     
+    TF_REF_PATTERN = re.compile(r'(\d+)\s*-\s*(?:T|F|TRUE|FALSE|Đ|S|ĐÚNG|SAI)', re.IGNORECASE)
+    
     @staticmethod
     def detect_language(text):
         """Detect if document is in English or Vietnamese"""
         vietnamese_chars = set('àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ')
         vietnamese_count = sum(1 for char in text.lower() if char in vietnamese_chars)
-        
-        # If more than 5% of characters are Vietnamese-specific, consider it Vietnamese
         return 'vi' if vietnamese_count > len(text) * 0.05 else 'en'
     
     @staticmethod
@@ -111,11 +106,9 @@ class WordQuestionParser:
 
         prompt_lower = prompt.lower()
 
-        # Ordering takes precedence when there is an explicit ordering answer.
         if order:
             return Question.QuestionType.ORDERING
 
-        # Structural TF detection: numbered statements and answers like "1-T, 2-F".
         has_numbered_options = any("number" in opt for opt in options)
         tf_answer_pattern = re.compile(
             r'^\s*\d+\s*-\s*(?:T|F|TRUE|FALSE|Y|N|YES|NO|Đ|S|ĐÚNG|SAI)(?:\s*,\s*\d+\s*-\s*(?:T|F|TRUE|FALSE|Y|N|YES|NO|Đ|S|ĐÚNG|SAI))*\s*$',
@@ -125,7 +118,6 @@ class WordQuestionParser:
         if has_numbered_options and has_tf_answer_format:
             return Question.QuestionType.TRUE_FALSE_EXTENDED
 
-        # Check for ordering by prompt keywords.
         ordering_keywords = (
             WordQuestionParser.ORDERING_KEYWORDS_EN
             if language == 'en' else WordQuestionParser.ORDERING_KEYWORDS_VI
@@ -133,7 +125,6 @@ class WordQuestionParser:
         if any(keyword in prompt_lower for keyword in ordering_keywords):
             return Question.QuestionType.ORDERING
 
-        # Check for true/false by prompt keywords.
         tf_keywords = (
             WordQuestionParser.TRUE_FALSE_KEYWORDS_EN
             if language == 'en' else WordQuestionParser.TRUE_FALSE_KEYWORDS_VI
@@ -142,23 +133,47 @@ class WordQuestionParser:
             return Question.QuestionType.TRUE_FALSE_EXTENDED
 
         return Question.QuestionType.MULTIPLE_CHOICE
-    
+
+    @staticmethod
+    def _extract_paragraph_images(paragraph, doc_part):
+        """Extract images from a paragraph element."""
+        images = []
+        if qn is None:
+            return images
+        try:
+            drawings = paragraph._element.findall('.//' + qn('w:drawing'))
+            for drawing in drawings:
+                blips = drawing.findall('.//' + qn('a:blip'))
+                for blip in blips:
+                    rId = blip.get(qn('r:embed'))
+                    if rId and rId in doc_part.rels:
+                        rel = doc_part.rels[rId]
+                        try:
+                            image_part = rel.target_part
+                            images.append({
+                                'blob': image_part.blob,
+                                'content_type': image_part.content_type,
+                            })
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[Parser] Error extracting images from paragraph: {e}")
+        return images
+
     @staticmethod
     def parse_document(file_path):
         """
-        Parse Word document and extract questions
-        Auto-detects language (English or Vietnamese)
-        Returns: List of question dictionaries
+        Parse Word document and extract raw question data.
+        Returns: (list of raw question dicts, language string)
         """
         doc = docx.Document(file_path)
         
-        # Detect language from first few paragraphs
-        sample_text = ' '.join([p.text for p in doc.paragraphs[:5]])
+        # Detect language
+        sample_text = ' '.join([p.text for p in doc.paragraphs[:10]])
         language = WordQuestionParser.detect_language(sample_text)
-        
         print(f"[Parser] Detected language: {language}")
         
-        # Select patterns based on language
+        # Select patterns
         if language == 'en':
             question_pattern = WordQuestionParser.QUESTION_PATTERN_EN
             answer_pattern = WordQuestionParser.ANSWER_PATTERN_EN
@@ -168,107 +183,193 @@ class WordQuestionParser:
             answer_pattern = WordQuestionParser.ANSWER_PATTERN_VI
             order_pattern = WordQuestionParser.ORDER_PATTERN_VI
         
-        questions_data = []
+        raw_questions = []
         current_question = None
         current_options = []
         current_answer = None
         current_order = None
+        current_image = None
         
-        all_lines = []
+        doc_part = doc.part
+        
         for para in doc.paragraphs:
             text = para.text.strip()
+            
+            # Check for images in this paragraph
+            para_images = WordQuestionParser._extract_paragraph_images(para, doc_part)
+            
             if not text:
+                # Image-only paragraph: associate with current question
+                if para_images and current_question and current_image is None:
+                    current_image = para_images[0]
                 continue
-            # Split by newline in case paragraph contains multiple lines
+            
+            # If paragraph has text + image, capture the image
+            if para_images and current_question and current_image is None:
+                current_image = para_images[0]
+            
+            # Process each line in the paragraph
             lines = text.split('\n')
-            all_lines.extend([line.strip() for line in lines if line.strip()])
-        
-        print(f"[Parser] Total lines to process: {len(all_lines)}")
-        
-        for text in all_lines:
-            if not text:
-                continue
-            
-            print(f"[Parser] Processing line: '{text}'")
-            
-            # Check for question start
-            question_match = question_pattern.match(text)
-            if question_match:
-                # Save previous question if exists
-                if current_question:
-                    print(f"[Parser] Saving previous question: {current_question['prompt'][:50]}...")
-                    questions_data.append(
-                        WordQuestionParser._build_question_data(
-                            current_question, current_options, 
-                            current_answer, current_order, language
-                        )
-                    )
+            for line_text in lines:
+                line_text = line_text.strip()
+                if not line_text:
+                    continue
                 
-                # Start new question
-                question_num = question_match.group(1)
-                question_text = question_match.group(2)
-                current_question = {
-                    "number": int(question_num),
-                    "prompt": question_text.strip()
-                }
-                current_options = []
-                current_answer = None
-                current_order = None
-                print(f"[Parser] Started question {question_num}: {question_text}")
-                continue
-            
-            # Check for options (A, B, C, D...)
-            option_match = WordQuestionParser.OPTION_PATTERN.match(text)
-            if option_match and current_question:
-                letter = option_match.group(1)
-                option_text = option_match.group(2)
-                current_options.append({
-                    "letter": letter,
-                    "text": option_text.strip(),
-                    "order": len(current_options)
-                })
-                print(f"[Parser] Added option {letter}: {option_text}")
-                continue
-            
-            # Check for numbered options (1, 2, 3, 4 for True/False)
-            numbered_match = WordQuestionParser.NUMBERED_OPTION_PATTERN.match(text)
-            if numbered_match and current_question:
-                number = numbered_match.group(1)
-                option_text = numbered_match.group(2)
-                current_options.append({
-                    "number": int(number),
-                    "text": option_text.strip(),
-                    "order": len(current_options)
-                })
-                print(f"[Parser] Added numbered option {number}: {option_text}")
-                continue
-            
-            # Check for answer
-            answer_match = answer_pattern.match(text)
-            if answer_match:
-                current_answer = answer_match.group(1).strip()
-                print(f"[Parser] Found answer: {current_answer}")
-                continue
-            
-            # Check for ordering answer
-            order_match = order_pattern.match(text)
-            if order_match:
-                current_order = order_match.group(1).strip()
-                print(f"[Parser] Found order: {current_order}")
-                continue
+                # Check for question start
+                question_match = question_pattern.match(line_text)
+                if question_match:
+                    # Save previous question
+                    if current_question:
+                        raw_questions.append({
+                            'number': current_question['number'],
+                            'prompt': current_question['prompt'],
+                            'options': current_options,
+                            'answer': current_answer,
+                            'order': current_order,
+                            'image': current_image,
+                        })
+                    
+                    current_question = {
+                        'number': int(question_match.group(1)),
+                        'prompt': question_match.group(2).strip(),
+                    }
+                    current_options = []
+                    current_answer = None
+                    current_order = None
+                    current_image = None
+                    continue
+                
+                # Check for lettered options (A, B, C, D...)
+                option_match = WordQuestionParser.OPTION_PATTERN.match(line_text)
+                if option_match and current_question:
+                    current_options.append({
+                        "letter": option_match.group(1),
+                        "text": option_match.group(2).strip(),
+                        "order": len(current_options)
+                    })
+                    continue
+                
+                # Check for numbered options (1, 2, 3... for True/False)
+                numbered_match = WordQuestionParser.NUMBERED_OPTION_PATTERN.match(line_text)
+                if numbered_match and current_question:
+                    current_options.append({
+                        "number": int(numbered_match.group(1)),
+                        "text": numbered_match.group(2).strip(),
+                        "order": len(current_options)
+                    })
+                    continue
+                
+                # Check for answer
+                answer_match = answer_pattern.match(line_text)
+                if answer_match:
+                    current_answer = answer_match.group(1).strip()
+                    continue
+                
+                # Check for ordering answer
+                order_match = order_pattern.match(line_text)
+                if order_match:
+                    current_order = order_match.group(1).strip()
+                    continue
         
         # Save last question
         if current_question:
-            print(f"[Parser] Saving last question: {current_question['prompt'][:50]}...")
-            questions_data.append(
-                WordQuestionParser._build_question_data(
-                    current_question, current_options, 
-                    current_answer, current_order, language
-                )
-            )
+            raw_questions.append({
+                'number': current_question['number'],
+                'prompt': current_question['prompt'],
+                'options': current_options,
+                'answer': current_answer,
+                'order': current_order,
+                'image': current_image,
+            })
         
-        print(f"[Parser] Total questions parsed: {len(questions_data)}")
-        return questions_data
+        print(f"[Parser] Total raw questions parsed: {len(raw_questions)}")
+        return raw_questions, language
+
+    @staticmethod
+    def validate_raw_questions(raw_questions, language='en'):
+        """
+        Validate parsed questions. Returns (valid_questions, errors).
+        Questions with errors are excluded from valid_questions.
+        """
+        errors = []
+        valid_questions = []
+        
+        for q in raw_questions:
+            q_num = q['number']
+            q_errors = []
+            
+            # 1. Empty prompt
+            if not q['prompt'] or not q['prompt'].strip():
+                q_errors.append({
+                    'question': q_num,
+                    'type': 'empty_prompt',
+                    'message': f"Question {q_num}: Empty question prompt"
+                })
+            
+            has_letter_options = any('letter' in opt for opt in q['options'])
+            has_numbered_options = any('number' in opt for opt in q['options'])
+            
+            # 2. Has options but no answer at all
+            if (has_letter_options or has_numbered_options) and not q['answer'] and not q['order']:
+                q_errors.append({
+                    'question': q_num,
+                    'type': 'missing_answer',
+                    'message': f"Question {q_num}: Missing answer line (ANSWER/ĐÁP ÁN)"
+                })
+            
+            # 3. MC answer references non-existent options
+            if q['answer'] and has_letter_options:
+                available_letters = {opt['letter'] for opt in q['options'] if 'letter' in opt}
+                answer_parts = [l.strip().upper() for l in q['answer'].split(',')]
+                is_tf_format = any('-' in part for part in answer_parts)
+                
+                if not is_tf_format:
+                    invalid_refs = [l for l in answer_parts if l and l not in available_letters]
+                    if invalid_refs:
+                        q_errors.append({
+                            'question': q_num,
+                            'type': 'invalid_answer_reference',
+                            'message': f"Question {q_num}: Answer references non-existent option(s) "
+                                       f"{', '.join(invalid_refs)} "
+                                       f"(available: {', '.join(sorted(available_letters))})"
+                        })
+            
+            # 4. Ordering references non-existent options
+            if q['order'] and has_letter_options:
+                available_letters = {opt['letter'] for opt in q['options'] if 'letter' in opt}
+                order_letters = [l.strip().upper() for l in q['order'].split(',')]
+                invalid_refs = [l for l in order_letters if l and l not in available_letters]
+                if invalid_refs:
+                    q_errors.append({
+                        'question': q_num,
+                        'type': 'invalid_order_reference',
+                        'message': f"Question {q_num}: Order references non-existent option(s) "
+                                   f"{', '.join(invalid_refs)} "
+                                   f"(available: {', '.join(sorted(available_letters))})"
+                    })
+            
+            # 5. TF answer references non-existent statement numbers
+            if q['answer'] and has_numbered_options:
+                available_numbers = {opt['number'] for opt in q['options'] if 'number' in opt}
+                tf_matches = WordQuestionParser.TF_REF_PATTERN.findall(q['answer'])
+                if tf_matches:
+                    referenced_numbers = {int(n) for n in tf_matches}
+                    invalid_nums = referenced_numbers - available_numbers
+                    if invalid_nums:
+                        q_errors.append({
+                            'question': q_num,
+                            'type': 'invalid_tf_reference',
+                            'message': f"Question {q_num}: Answer references non-existent statement(s) "
+                                       f"{', '.join(map(str, sorted(invalid_nums)))} "
+                                       f"(available: {', '.join(map(str, sorted(available_numbers)))})"
+                        })
+            
+            if q_errors:
+                errors.extend(q_errors)
+            else:
+                valid_questions.append(q)
+        
+        return valid_questions, errors
     
     @staticmethod
     def _build_question_data(question_info, options, answer, order, language='en'):
@@ -277,46 +378,36 @@ class WordQuestionParser:
             question_info["prompt"], options, answer=answer, order=order, language=language
         )
         
-        print(f"[Parser] Building question data. Type: {question_type}, Options count: {len(options)}, Answer: {answer}")
-        
         result = {
             "question": {
                 "prompt": question_info["prompt"],
                 "question_type": question_type,
                 "points": 1.0,
-                "correct_answer_text": None  # ✅ Add this field
+                "correct_answer_text": None
             },
             "options": []
         }
         
         if question_type == Question.QuestionType.FILL_IN_BLANK:
-            # For fill blank, store answer in correct_answer_text
             if answer:
-                # Tách các đáp án bằng dấu phẩy, loại bỏ khoảng trắng và các phần tử rỗng
                 answer_list = [a.strip() for a in answer.split(',') if a.strip()]
-                # Lưu lại dưới dạng chuỗi ngăn cách bởi dấu phẩy chuẩn: "Hanoi, Hà Nội"
                 result["question"]["correct_answer_text"] = ", ".join(answer_list)
             else:
                 result["question"]["correct_answer_text"] = ""
-            
-            print(f"[Parser] Fill in blank question, answers parsed: {result['question']['correct_answer_text']}")
-            # No options needed for fill in blank
         
         elif question_type == Question.QuestionType.TRUE_FALSE_EXTENDED:
-            # Parse answer like "1-T, 2-F, 3-T, 4-F" (English) or "1-Đ, 2-S, 3-Đ, 4-Đ" (Vietnamese)
             answer_map = WordQuestionParser._parse_true_false_answer(answer, language)
             for opt in options:
                 opt_number = opt.get("number")
                 is_correct = answer_map.get(opt_number, False)
                 result["options"].append({
                     "text": opt["text"],
-                    "is_correct_bool": is_correct,  # Use is_correct_bool for TFE
+                    "is_correct_bool": is_correct,
                     "correct_order": None,
                     "order": opt["order"]
                 })
         
         elif question_type == Question.QuestionType.ORDERING:
-            # Parse order like "B, C, A, D"
             correct_order = WordQuestionParser._parse_ordering_answer(order or answer)
             for opt in options:
                 letter = opt.get("letter")
@@ -329,12 +420,7 @@ class WordQuestionParser:
                 })
         
         else:  # MULTIPLE_CHOICE
-            # Parse answer like "A" or "A, C" for multiple correct
             correct_letters = WordQuestionParser._parse_multiple_choice_answer(answer)
-            score_per_correct = 100.0 / len(correct_letters) if correct_letters else 0
-            
-            print(f"[Parser] Multiple choice. Correct answers: {correct_letters}")
-            
             for opt in options:
                 letter = opt.get("letter")
                 is_correct = letter in correct_letters
@@ -354,23 +440,19 @@ class WordQuestionParser:
         if not answer:
             return answer_map
         
-        # Format: "1-T, 2-F, 3-T, 4-F" (English) or "1-Đ, 2-S, 3-Đ, 4-Đ" (Vietnamese)
         parts = [p.strip() for p in answer.split(',')]
-        
         for part in parts:
             if '-' in part:
-                num_str, tf = part.split('-')
-                num = int(num_str.strip())
-                
+                num_str, tf = part.split('-', 1)
+                try:
+                    num = int(num_str.strip())
+                except ValueError:
+                    continue
                 tf_upper = tf.strip().upper()
-                
                 if language == 'en':
-                    # English: T/TRUE or F/FALSE
                     is_true = tf_upper in ['T', 'TRUE', 'YES', 'Y']
                 else:
-                    # Vietnamese: Đ/ĐÚNG or S/SAI
                     is_true = tf_upper in ['Đ', 'ĐÚNG', 'T', 'TRUE']
-                
                 answer_map[num] = is_true
         
         return answer_map
@@ -380,7 +462,6 @@ class WordQuestionParser:
         """Parse ordering answer string"""
         if not order_str:
             return []
-        # Format: "B, C, A, D" or "B,C,A,D"
         return [letter.strip().upper() for letter in order_str.split(',')]
     
     @staticmethod
@@ -388,29 +469,24 @@ class WordQuestionParser:
         """Parse multiple choice answer string"""
         if not answer:
             return []
-        # Format: "A" or "A, C" or "A,C"
         return [letter.strip().upper() for letter in answer.split(',')]
 
 
 def process_word_document(file_path, section, user):
     """
     Process Word document and create questions in database.
-    Auto-detects language (English or Vietnamese).
-    Automatically skips duplicate questions (same prompt + options).
-    
-    Args:
-        file_path: Path to the .docx file
-        section: Section object to attach questions to
-        user: User who is creating the questions
+    With validation, error reporting, and image extraction.
     
     Returns:
-        dict with 'success', 'created_count', 'skipped_count', 'skipped_duplicates', 'errors', 'language'
+        dict with 'success', 'created_count', 'skipped_count', 
+        'validation_errors', 'errors', 'language'
     """
     result = {
         "success": False,
         "created_count": 0,
         "skipped_count": 0,
         "skipped_duplicates": [],
+        "validation_errors": [],
         "errors": [],
         "language": "unknown"
     }
@@ -418,98 +494,188 @@ def process_word_document(file_path, section, user):
     try:
         print(f"[process_word_document] Starting to process: {file_path}")
         
-        # Parse document
-        questions_data = WordQuestionParser.parse_document(file_path)
+        # 1. Parse document (raw data + images)
+        raw_questions, language = WordQuestionParser.parse_document(file_path)
+        result["language"] = language
         
-        if not questions_data:
-            result["errors"].append("No questions found in document")
-            print("[process_word_document] No questions found")
+        if not raw_questions:
+            result["errors"].append({
+                "question": 0,
+                "type": "empty_document",
+                "message": "No questions found in document. Make sure questions start with "
+                           "'Question N:' (English) or 'Câu N:' (Vietnamese)."
+            })
             return result
         
-        # Detect language from first question
-        if questions_data:
-            first_prompt = questions_data[0]["question"]["prompt"]
-            result["language"] = WordQuestionParser.detect_language(first_prompt)
+        # 2. Validate raw questions
+        valid_questions, validation_errors = WordQuestionParser.validate_raw_questions(
+            raw_questions, language
+        )
+        result["validation_errors"] = validation_errors
         
-        print(f"[process_word_document] Found {len(questions_data)} questions to create")
+        if validation_errors:
+            print(f"[process_word_document] {len(validation_errors)} validation error(s) found")
         
-        # ── Build fingerprint set from existing questions in this section ──
-        existing_questions = section.questions.filter(is_active=True).prefetch_related('options')
+        if not valid_questions:
+            result["errors"].append({
+                "question": 0,
+                "type": "all_invalid",
+                "message": "All questions had validation errors. No questions were created."
+            })
+            return result
+        
+        # 3. Build fingerprint set for deduplication
+        existing_qs = section.questions.filter(is_active=True).values_list('id', 'prompt')
+        existing_opts = AnswerOption.objects.filter(
+            question__section=section, question__is_active=True
+        ).values_list('question_id', 'text')
+        
+        # Group options by question_id
+        opts_by_q = {}
+        for q_id, opt_text in existing_opts:
+            if q_id not in opts_by_q:
+                opts_by_q[q_id] = []
+            opts_by_q[q_id].append(opt_text)
+            
         existing_fingerprints = set()
-        for eq in existing_questions:
-            opts_texts = [opt.text for opt in eq.options.all()]
-            fp = compute_fingerprint(eq.prompt, opts_texts)
+        for q_id, prompt in existing_qs:
+            opts_texts = opts_by_q.get(q_id, [])
+            fp = compute_fingerprint(prompt, opts_texts)
             existing_fingerprints.add(fp)
         
-        print(f"[process_word_document] Existing fingerprints in section: {len(existing_fingerprints)}")
-        
-        # Also track fingerprints within the current upload batch to avoid intra-file duplicates
         batch_fingerprints = set()
         
-        # Create questions and options
-        created_count = 0
+        # 4. Prepare questions for processing
+        questions_to_process = []
         skipped_count = 0
         skipped_duplicates = []
         
-        for idx, data in enumerate(questions_data, 1):
+        for raw_q in valid_questions:
             try:
-                question_data = data["question"]
-                options_data = data["options"]
+                # Build structured data
+                built = WordQuestionParser._build_question_data(
+                    {'number': raw_q['number'], 'prompt': raw_q['prompt']},
+                    raw_q['options'],
+                    raw_q['answer'],
+                    raw_q['order'],
+                    language
+                )
                 
-                # Compute fingerprint for the new question
+                question_data = built["question"]
+                options_data = built["options"]
+                
+                # Fingerprint check
                 new_opts_texts = [opt["text"] for opt in options_data]
                 fp = compute_fingerprint(question_data["prompt"], new_opts_texts)
                 
-                # Check for duplicates
                 if fp in existing_fingerprints or fp in batch_fingerprints:
                     skipped_count += 1
                     skipped_duplicates.append(question_data["prompt"][:80])
-                    print(f"[process_word_document] SKIPPED duplicate question {idx}: {question_data['prompt'][:50]}...")
                     continue
                 
-                # Not a duplicate → create
                 batch_fingerprints.add(fp)
                 
-                print(f"[process_word_document] Creating question {idx}: {question_data['prompt'][:50]}...")
-                
-                question = Question.objects.create(
-                    section=section,
-                    created_by=user,
-                    prompt=question_data["prompt"],
-                    question_type=question_data["question_type"],
-                    correct_answer_text=question_data.get("correct_answer_text")
-                )
-                
-                # Create options
-                for opt_data in options_data:
-                    AnswerOption.objects.create(
-                        question=question,
-                        text=opt_data["text"],
-                        is_correct_bool=opt_data.get("is_correct_bool", False),
-                        correct_order=opt_data.get("correct_order"),
-                        order=opt_data["order"]
-                    )
-                
-                created_count += 1
+                questions_to_process.append({
+                    'raw_q': raw_q,
+                    'question_data': question_data,
+                    'options_data': options_data
+                })
                 
             except Exception as e:
-                error_msg = f"Error creating question '{data['question']['prompt'][:50]}...': {str(e)}"
-                result["errors"].append(error_msg)
+                error_msg = f"Error preparing question {raw_q['number']}: {str(e)}"
+                result["errors"].append({
+                    "question": raw_q['number'],
+                    "type": "preparation_error",
+                    "message": error_msg
+                })
                 print(f"[process_word_document] {error_msg}")
-                import traceback
-                traceback.print_exc()
                 continue
+                
+        # 5. Parallel Image Uploads
+        image_urls = {}
+        images_to_upload = [(idx, q) for idx, q in enumerate(questions_to_process) if q['raw_q'].get('image')]
+        
+        if images_to_upload:
+            print(f"[process_word_document] Uploading {len(images_to_upload)} images in parallel...")
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {}
+                for idx, q in images_to_upload:
+                    image_data = q['raw_q']['image']
+                    futures[executor.submit(
+                        upload_image_to_cloudinary,
+                        image_data['blob'],
+                        image_data.get('content_type', 'image/png')
+                    )] = idx
+                    
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        image_urls[idx] = future.result()
+                    except Exception as e:
+                        print(f"[process_word_document] Image upload failed for index {idx}: {e}")
+                        image_urls[idx] = None
+
+        # 6. Bulk Create DB Records
+        created_count = 0
+        if questions_to_process:
+            try:
+                with transaction.atomic():
+                    questions_to_create = []
+                    for idx, q_info in enumerate(questions_to_process):
+                        q_data = q_info['question_data']
+                        q = Question(
+                            section=section,
+                            created_by=user,
+                            prompt=q_data["prompt"],
+                            question_type=q_data["question_type"],
+                            correct_answer_text=q_data.get("correct_answer_text"),
+                            image=image_urls.get(idx)
+                        )
+                        questions_to_create.append(q)
+                    
+                    # Bulk create questions (Returns IDs in PostgreSQL/SQLite)
+                    created_questions = Question.objects.bulk_create(questions_to_create)
+                    
+                    # Prepare options
+                    options_to_create = []
+                    for created_q, q_info in zip(created_questions, questions_to_process):
+                        for opt_data in q_info['options_data']:
+                            opt = AnswerOption(
+                                question=created_q,
+                                text=opt_data["text"],
+                                is_correct_bool=opt_data.get("is_correct_bool", False),
+                                correct_order=opt_data.get("correct_order"),
+                                order=opt_data["order"]
+                            )
+                            options_to_create.append(opt)
+                    
+                    # Bulk create options
+                    AnswerOption.objects.bulk_create(options_to_create)
+                    created_count = len(created_questions)
+            except Exception as e:
+                error_msg = f"Database transaction failed during bulk creation: {str(e)}"
+                result["errors"].append({
+                    "question": 0,
+                    "type": "database_error",
+                    "message": error_msg
+                })
+                print(f"[process_word_document] {error_msg}")
         
         result["created_count"] = created_count
         result["skipped_count"] = skipped_count
         result["skipped_duplicates"] = skipped_duplicates
         result["success"] = created_count > 0 or skipped_count > 0
         
-        print(f"[process_word_document] Created {created_count}, Skipped {skipped_count} duplicates")
+        print(f"[process_word_document] Created {created_count}, Skipped {skipped_count}, "
+              f"Validation errors {len(validation_errors)}")
         
     except Exception as e:
-        error_msg = f"Critical error: {str(e)}"
-        result["errors"].append(error_msg)
+        error_msg = f"Critical error processing document: {str(e)}"
+        result["errors"].append({
+            "question": 0,
+            "type": "critical",
+            "message": error_msg
+        })
         print(f"[process_word_document] {error_msg}")
         import traceback
         traceback.print_exc()

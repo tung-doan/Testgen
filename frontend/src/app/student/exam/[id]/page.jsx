@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Navbar from "@/components/Navbar";
@@ -30,11 +30,13 @@ import {
 
 // CẤU HÌNH SỐ CÂU HỎI MỖI TRANG
 const QUESTIONS_PER_PAGE = 40;
+// Auto-save interval in milliseconds (every 30 seconds)
+const AUTO_SAVE_INTERVAL = 30000;
 
 export default function TakeExam({ params }) {
   const { id } = use(params);
   const router = useRouter();
-  const { getExamAttempt, submitExam, loading } = useOnlineExam();
+  const { getExamAttempt, submitExam, saveAnswers, loading } = useOnlineExam();
 
   const [attemptData, setAttemptData] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -48,6 +50,32 @@ export default function TakeExam({ params }) {
 
   const [pendingScrollId, setPendingScrollId] = useState(null);
 
+  // Track if exam was auto-expired by backend
+  const [isAutoExpired, setIsAutoExpired] = useState(false);
+
+  // Ref for auto-save to access latest answers without re-triggering effect
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+
+  // Ref to track if submit is already in progress (prevent double-submit)
+  const isSubmittingRef = useRef(false);
+
+  // Ref for debounce timer
+  const debounceSaveTimerRef = useRef(null);
+
+  // Helper: save current answers to backend
+  const performSave = useCallback(() => {
+    const currentAnswers = answersRef.current;
+    const formattedAnswers = Object.values(currentAnswers).filter(
+      (answer) => answer !== null
+    );
+    if (formattedAnswers.length > 0) {
+      saveAnswers(id, formattedAnswers).catch(() => {
+        // Silent fail - already logged in hook
+      });
+    }
+  }, [id, saveAnswers]);
+
   useEffect(() => {
     fetchExamAttempt();
   }, [id]);
@@ -59,7 +87,7 @@ export default function TakeExam({ params }) {
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
-          handleSubmitExam();
+          handleAutoSubmit();
           return 0;
         }
         return prev - 1;
@@ -68,6 +96,66 @@ export default function TakeExam({ params }) {
 
     return () => clearInterval(timer);
   }, [attemptData, timeRemaining]);
+
+  // Auto-save answers periodically (every 30s)
+  useEffect(() => {
+    if (!attemptData || attemptData.status === "COMPLETED") return;
+
+    const autoSaveTimer = setInterval(performSave, AUTO_SAVE_INTERVAL);
+
+    return () => clearInterval(autoSaveTimer);
+  }, [attemptData, performSave]);
+
+  // Save answers on page refresh / tab close
+  useEffect(() => {
+    if (!attemptData || attemptData.status === "COMPLETED") return;
+
+    const handleBeforeUnload = () => {
+      const currentAnswers = answersRef.current;
+      const formattedAnswers = Object.values(currentAnswers).filter(
+        (answer) => answer !== null
+      );
+      if (formattedAnswers.length > 0) {
+        const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/';
+        const url = `${baseURL}online-exams/attempts/${id}/save-answers/`;
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', url, false); // synchronous - blocks until complete
+          xhr.withCredentials = true; // send cookies for auth
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          xhr.send(JSON.stringify({ answers: formattedAnswers }));
+        } catch (err) {
+          // Best effort - may fail but that's ok
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [attemptData, id]);
+
+  // Debounced save: save 3 seconds after the last answer change
+  useEffect(() => {
+    if (!attemptData || attemptData.status === "COMPLETED") return;
+
+    // Don't save on initial load (all null answers)
+    const hasAnyAnswer = Object.values(answers).some((a) => a !== null);
+    if (!hasAnyAnswer) return;
+
+    if (debounceSaveTimerRef.current) {
+      clearTimeout(debounceSaveTimerRef.current);
+    }
+
+    debounceSaveTimerRef.current = setTimeout(() => {
+      performSave();
+    }, 3000);
+
+    return () => {
+      if (debounceSaveTimerRef.current) {
+        clearTimeout(debounceSaveTimerRef.current);
+      }
+    };
+  }, [answers, attemptData, performSave]);
 
   useEffect(() => {
     if (pendingScrollId) {
@@ -88,7 +176,7 @@ export default function TakeExam({ params }) {
     setActiveNavIndex(index);
     if (!attemptData) return;
 
-    const examQuestions = attemptData.exam_detail.exam_questions;
+    const examQuestions = attemptData.exam_detail?.exam_questions || [];
     const targetQuestion = examQuestions[index];
 
     if (!targetQuestion) return;
@@ -113,6 +201,14 @@ export default function TakeExam({ params }) {
   const fetchExamAttempt = async () => {
     try {
       const data = await getExamAttempt(id);
+
+      // If the backend returned a COMPLETED status (auto-expired), redirect to results
+      if (data.status === "COMPLETED") {
+        setIsAutoExpired(true);
+        setAttemptData(data);
+        return;
+      }
+
       setAttemptData(data);
 
       const startTime = new Date(data.start_time);
@@ -124,10 +220,23 @@ export default function TakeExam({ params }) {
 
       setTimeRemaining(remainingSeconds);
 
+      // Initialize answers - load saved answers if resuming
       const initialAnswers = {};
-      data.exam_detail.exam_questions.forEach((eq) => {
+      const examQuestions = data.exam_detail?.exam_questions || [];
+      examQuestions.forEach((eq) => {
         initialAnswers[eq.question.id] = null;
       });
+
+      // Merge saved answers from backend (for resume)
+      if (data.saved_answers) {
+        Object.entries(data.saved_answers).forEach(([questionId, answerObj]) => {
+          const qId = parseInt(questionId);
+          if (initialAnswers.hasOwnProperty(qId)) {
+            initialAnswers[qId] = answerObj;
+          }
+        });
+      }
+
       setAnswers(initialAnswers);
     } catch (err) {
       console.error("Error fetching exam attempt:", err);
@@ -145,7 +254,30 @@ export default function TakeExam({ params }) {
     }));
   };
 
+  const handleAutoSubmit = useCallback(async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
+    try {
+      const currentAnswers = answersRef.current;
+      const formattedAnswers = Object.values(currentAnswers).filter(
+        (answer) => answer !== null
+      );
+
+      await submitExam(id, formattedAnswers);
+      router.push(`/student/results/${id}`);
+    } catch (err) {
+      console.error("Error auto-submitting exam:", err);
+      const msg = err.response?.status === 404 ? "The exam or some questions no longer exist." : err.message;
+      alert(`Failed to auto-submit exam: ${msg}`);
+      isSubmittingRef.current = false;
+    }
+  }, [id, submitExam, router]);
+
   const handleSubmitExam = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     try {
       window.dispatchEvent(new Event("navigation-start"));
       const formattedAnswers = Object.values(answers).filter(
@@ -155,9 +287,11 @@ export default function TakeExam({ params }) {
       await submitExam(id, formattedAnswers);
       router.push(`/student/results/${id}`);
     } catch (err) {
+      isSubmittingRef.current = false;
       window.dispatchEvent(new Event("navigation-end"));
       console.error("Error submitting exam:", err);
-      alert(`Failed to submit exam: ${err.message}`);
+      const msg = err.response?.status === 404 ? "The exam or some questions no longer exist." : err.message;
+      alert(`Failed to submit exam: ${msg}`);
     }
   };
 
@@ -184,14 +318,13 @@ export default function TakeExam({ params }) {
     if (!answer || !answer.answer_data) return false;
     const data = answer.answer_data;
 
-    // 1. Fill in the Blank (Dạng text đơn) -> SỬA LỖI CỦA BẠN TẠI ĐÂY
+    // 1. Fill in the Blank (Dạng text đơn)
     if (typeof data.text === "string" && data.text.trim() !== "") {
       return true;
     }
 
     // 2. Fill in the Blank (Dạng nhiều ô) hoặc True/False
     if (Array.isArray(data.answers)) {
-      // Chỉ cần điền ít nhất 1 ô là tính đã làm
       return data.answers.some(
         (a) => a !== null && a !== "" && a !== undefined,
       );
@@ -226,11 +359,54 @@ export default function TakeExam({ params }) {
     }
   }, [attemptData]);
 
+  // --- LOGIC PHÂN TRANG MỚI ---
+  const examQuestions = attemptData?.exam_detail?.exam_questions || [];
+  const totalQuestions = examQuestions.length;
+  const totalPages = Math.ceil(totalQuestions / QUESTIONS_PER_PAGE);
+
+  // Auto-adjust pagination when items are deleted
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
   if (!attemptData) {
     return <ExamLoading />;
   }
 
-  // Time's Up View
+  // Exam was auto-expired by backend - show redirect
+  if (isAutoExpired) {
+    return (
+      <>
+        <Header />
+        <Navbar />
+        <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 flex items-center justify-center p-4">
+          <Card className="max-w-md shadow-xl">
+            <CardContent className="pt-6 text-center">
+              <div className="bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <Clock className="h-8 w-8 text-red-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                Time's Up!
+              </h2>
+              <p className="text-gray-600 mb-4">
+                Your exam time has expired and was automatically submitted.
+              </p>
+              <Button
+                onClick={() => router.push(`/student/results/${id}`)}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                View Results
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
+  // Time's Up View (timer reached 0 on client side)
   if (timeRemaining <= 0 && attemptData.status === "IN_PROGRESS") {
     return (
       <>
@@ -261,10 +437,6 @@ export default function TakeExam({ params }) {
     );
   }
 
-  // --- LOGIC PHÂN TRANG MỚI ---
-  const examQuestions = attemptData.exam_detail.exam_questions || [];
-  const totalQuestions = examQuestions.length;
-  const totalPages = Math.ceil(totalQuestions / QUESTIONS_PER_PAGE);
   const answeredCount = getAnsweredCount();
 
   // Cắt mảng câu hỏi cho trang hiện tại
@@ -318,7 +490,7 @@ export default function TakeExam({ params }) {
                         <div
                           className="bg-white h-full transition-all duration-300"
                           style={{
-                            width: `${(answeredCount / totalQuestions) * 100}%`,
+                            width: `${totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0}%`,
                           }}
                         />
                       </div>
@@ -335,7 +507,7 @@ export default function TakeExam({ params }) {
                   />
                   <Button
                     onClick={() => setIsSubmitDialogOpen(true)}
-                    className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                    className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 cursor-pointer"
                   >
                     <Send className="h-4 w-4 mr-2" />
                     Submit Exam
@@ -375,7 +547,16 @@ export default function TakeExam({ params }) {
                               <CardTitle className="text-xl leading-relaxed">
                                 {q.question.prompt}
                               </CardTitle>
-                              <div className="flex items-center gap-2 flex-wrap">
+                              {q.question.image && (
+                                <div className="relative w-full max-w-2xl rounded overflow-hidden border border-gray-200 mt-4 mb-2">
+                                  <img
+                                    src={q.question.image}
+                                    alt="Question Image"
+                                    className="w-full h-auto object-contain"
+                                  />
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2 flex-wrap mt-2">
                                 <Badge className="bg-blue-100 text-blue-800 border-blue-200">
                                   {q.question.question_type_display}
                                 </Badge>
@@ -417,7 +598,7 @@ export default function TakeExam({ params }) {
 
                   <Button
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages}
+                    disabled={currentPage >= totalPages}
                     className="w-32 bg-blue-600 hover:bg-blue-700"
                   >
                     Next Page
@@ -480,6 +661,7 @@ export default function TakeExam({ params }) {
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
+              className="cursor-pointer"
               onClick={() => setIsSubmitDialogOpen(false)}
             >
               Cancel
@@ -487,7 +669,7 @@ export default function TakeExam({ params }) {
             <Button
               onClick={handleSubmitExam}
               disabled={loading}
-              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 cursor-pointer"
             >
               {loading ? (
                 <>

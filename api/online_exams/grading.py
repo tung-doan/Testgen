@@ -51,9 +51,9 @@ def grade_multiple_choice(question, student_answer, max_points):
 def grade_true_false(question, student_answer, max_points):
     """
     Chấm điểm True/False Extended
-    student_answer format: {'responses': [true, false, true, true]}
+    student_answer format: {'answers': [true, false, true, true]}
     """
-    responses = student_answer.get('responses', [])
+    responses = student_answer.get('answers') or student_answer.get('responses') or []
     
     if not responses:
         return 0.0

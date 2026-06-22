@@ -1,0 +1,47 @@
+@startuml
+title SD Import Questions from Docx
+
+actor ": Teacher" as User
+
+boundary ": UploadWordView" as View
+control ": QuestionBankController" as Controller
+control ": WordDocumentParser" as Parser
+entity ": Question" as Question
+entity ": AnswerOption" as Option
+
+' ===== 1. Teacher chọn file Word =====
+User -> View : 1: selectFile(file : File) : void
+View -> View : 1.1: validateFileSize(file : File) : boolean
+View -> View : 1.2: validateFileFormat(file : File) : boolean
+User <-- View
+
+' ===== 2. Upload file =====
+User -> View : 2: uploadFile(file : File, sectionId : int) : void
+View -> Controller : 2.1: uploadQuestions(file : File, sectionId : int) : Object
+
+' ===== 2.1. Controller gọi Parser xử lý file =====
+Controller -> Parser : 2.1.1: parseDocument(filePath : String) : List
+Parser -> Parser : 2.1.1.1: detectLanguage(text : String) : String
+Parser -> Parser : 2.1.1.2: detectQuestionType(prompt : String, options : List) : String
+Parser -> Parser : 2.1.1.3: extractImages(paragraph : Object) : List
+Parser -> Parser : 2.1.1.4: uploadImageToCloudinary(imageBlob : Bytes) : String
+Controller <-- Parser
+
+' ===== 2.2. Validate + Bulk Create =====
+Controller -> Parser : 2.1.2: validateQuestions(rawQuestions : List) : List
+Controller <-- Parser
+
+Controller -> Question : 2.1.3: bulkCreate(questions : List) : List
+activate Question
+Controller <-- Question
+deactivate Question
+
+Controller -> Option : 2.1.4: bulkCreate(options : List) : List
+activate Option
+Controller <-- Option
+deactivate Option
+
+View <-- Controller
+User <-- View : 2.1.5: display() : void
+
+@enduml

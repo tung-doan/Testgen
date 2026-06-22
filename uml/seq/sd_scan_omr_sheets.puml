@@ -1,0 +1,55 @@
+@startuml
+title SD Scan OMR Answer Sheets
+
+actor ": Teacher" as User
+
+boundary ": OMRScanView" as View
+control ": SubmissionController" as Controller
+control ": OMRProcessor" as OpenCV
+entity ": PaperSubmission" as Submission
+entity ": PaperAnswerDetected" as Answer
+
+' ===== 1. Upload ảnh chụp bài thi =====
+User -> View : 1: uploadSubmission(testId : int, image : File) : void
+View -> Controller : 1.1: uploadSubmission(testId : int, image : File) : Object
+
+' ===== 2. Controller tạo bản ghi nháp =====
+Controller -> Submission : 1.1.1: <<create>>\ncreate(testId : int, image : File)
+activate Submission
+Controller <-- Submission : submissionId
+deactivate Submission
+
+' ===== 3. Gọi OpenCV xử lý ảnh =====
+Controller -> OpenCV : 1.1.2: processSubmissionLocal(submissionId : int, imagePath : String) : Object
+activate OpenCV
+
+' --- 3.1. Perspective Transform (Cắt phẳng giấy) ---
+OpenCV -> OpenCV : 1.1.2.1: getPaperTransform(imagePath : String) : Object
+
+' --- 3.2. Nhận diện Marker Góc (Khoanh vùng OMR) ---
+OpenCV -> OpenCV : 1.1.2.2: findCornerMarkers(gray : Image) : Object
+OpenCV -> OpenCV : 1.1.2.3: validateMarkerGeometry(markerData : Object) : Object
+
+' --- 3.3. Đọc mã số sinh viên ---
+OpenCV -> OpenCV : 1.1.2.4: detectBubbleDigits(threshRegion : Image, numDigits : int) : List
+
+' --- 3.4. Đọc đáp án ---
+OpenCV -> OpenCV : 1.1.2.5: readAnswerBubbles(thresh : Image, template : Object) : List
+
+' --- 3.5. Chấm điểm dựa trên Variant ---
+OpenCV -> OpenCV : 1.1.2.6: gradeSubmission(submission : PaperSubmission) : float
+Controller <-- OpenCV : gradingResult
+deactivate OpenCV
+
+' ===== 4. Lưu kết quả vào Database =====
+Controller -> Submission : 1.1.3: updateScore(submissionId : int, score : float) : void
+Controller -> Answer : 1.1.4: <<create>>\nbulkCreate(answers : List)
+activate Answer
+Controller <-- Answer
+deactivate Answer
+
+' ===== 5. Trả kết quả về giao diện =====
+View <-- Controller : responseData (Score + Graded Image)
+User <-- View : 1.2: displayGradedResult(responseData) : void
+
+@enduml

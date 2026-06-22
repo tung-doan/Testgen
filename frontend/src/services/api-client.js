@@ -1,14 +1,14 @@
 import axios from "axios";
 
 const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/",
+  baseURL: process.env.NEXT_PUBLIC_API_URL === "http://localhost:8000/api/" ? "/api/" : (process.env.NEXT_PUBLIC_API_URL || "/api/"),
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Request interceptor - Thêm token hoặc xử lý trước khi gửi request
+
 apiClient.interceptors.request.use(
   (config) => {
     return config;
@@ -20,6 +20,7 @@ apiClient.interceptors.request.use(
 
 let isRefreshing = false;
 let failedQueue = [];
+let authFailureHandled = false;
 
 const processQueue = (error) => {
   failedQueue.forEach((prom) => {
@@ -33,18 +34,40 @@ const processQueue = (error) => {
   failedQueue = [];
 };
 
+const isAuthEndpoint = (url = "") =>
+  url.includes("/login") ||
+  url.includes("student-login") ||
+  url.includes("users/refresh");
+
+const handleAuthFailure = () => {
+  if (typeof window === "undefined" || authFailureHandled) return;
+
+  authFailureHandled = true;
+  localStorage.removeItem("user");
+  localStorage.removeItem("student");
+
+  const loginPaths = ["/login", "/student/login"];
+  if (!loginPaths.includes(window.location.pathname)) {
+    window.location.replace("/login");
+  }
+};
+
 // Response interceptor - Xử lý response và errors
 apiClient.interceptors.response.use(
   (response) => {
+    authFailureHandled = false;
     return response;
   },
   async (error) => {
     const originalRequest = error.config;
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
 
     // Xử lý lỗi 401 (Unauthorized)
     if (error.response?.status === 401 && !originalRequest._retry) {
       // Bỏ qua với yêu cầu login hoặc chính yêu cầu refresh để tránh loop
-      if (originalRequest.url?.includes('/login') || originalRequest.url?.includes('student-login') || originalRequest.url?.includes('users/refresh')) {
+      if (isAuthEndpoint(originalRequest.url)) {
         return Promise.reject(error);
       }
 
@@ -63,10 +86,8 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      // Thử refresh token ở đây
       try {
-        const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/";
-        // Sử dụng axios độc lập để không kích hoạt interceptor
+        const baseURL = process.env.NEXT_PUBLIC_API_URL === "http://localhost:8000/api/" ? "/api/" : (process.env.NEXT_PUBLIC_API_URL || "/api/");
         await axios.post(`${baseURL}users/refresh/`, {}, { withCredentials: true });
         
         isRefreshing = false;
@@ -76,10 +97,8 @@ apiClient.interceptors.response.use(
         isRefreshing = false;
         processQueue(refreshError);
         
-        // Nếu refresh thất bại, redirect về login
-        if (typeof window !== "undefined") {
-          window.location.href = "/login";
-        }
+        handleAuthFailure();
+        
         return Promise.reject(refreshError);
       }
     }
@@ -88,13 +107,6 @@ apiClient.interceptors.response.use(
   }
 );
 
-/**
- * Kết nối Axios interceptors với LoadingContext toàn cục.
- * Gọi hàm này 1 lần trong component cha (ví dụ: layout hoặc provider).
- *
- * Sử dụng config.silent = true để bỏ qua loading indicator cho request ngầm.
- * Ví dụ: apiClient.get('/health/', { silent: true })
- */
 export function wireLoadingInterceptors(startLoading, stopLoading) {
   apiClient.interceptors.request.use(
     (config) => {

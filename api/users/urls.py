@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('reset-password-email/', PasswordResetOTPEmailView.as_view(), name='reset_password_email'),
     path('reset-password-confirm/', PasswordResetConfirmView.as_view(), name='reset_password_confirm'),
+    path('reset-password-confirm-api/', PasswordResetConfirmAPIView.as_view(), name='reset_password_confirm_api'),
     path('user-info/', UserInfoView.as_view(), name='user_info'),
     path('refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
     # path("auth/", include("users.urls"), name="auth"),

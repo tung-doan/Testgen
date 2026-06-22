@@ -7,9 +7,10 @@ import {
   Award,
   PlayCircle,
   BookOpen,
+  RotateCcw,
 } from "lucide-react";
 
-export default function ExamCard({ exam, onStartExam, loading }) {
+export default function ExamCard({ exam, onStartExam, onContinueExam, loading }) {
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -19,20 +20,29 @@ export default function ExamCard({ exam, onStartExam, loading }) {
     });
   };
 
+  const hasInProgress = !!exam.in_progress_attempt_id;
+
   return (
     <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col !p-0 mb-4">
       {/* Card Header */}
-      <CardHeader className="bg-gradient-to-r from-indigo-50 to-purple-50 border-b">
+      <CardHeader className={`border-b ${hasInProgress ? 'bg-gradient-to-r from-amber-50 to-orange-50' : 'bg-gradient-to-r from-indigo-50 to-purple-50'}`}>
         <div className="p-5 space-y-3">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-lg line-clamp-2 leading-tight">
               {exam.title}
             </CardTitle>
-            {exam.attempts_made > 0 && (
-              <Badge variant="outline" className="shrink-0 text-xs">
-                {exam.attempts_made}/{exam.max_attempts}
-              </Badge>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {hasInProgress && (
+                <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-xs">
+                  In Progress
+                </Badge>
+              )}
+              {exam.attempts_made > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  {exam.attempts_made}/{exam.max_attempts}
+                </Badge>
+              )}
+            </div>
           </div>
           {exam.description && (
             <p className="text-sm text-gray-600 line-clamp-2 leading-relaxed">
@@ -45,7 +55,7 @@ export default function ExamCard({ exam, onStartExam, loading }) {
       {/* Card Content */}
       <CardContent className="p-5 space-y-4 flex-1 flex flex-col">
         {/* Exam Info */}
-        <div className="space-y-3 flex-1">
+        <div className="space-y-3 flex-1 mb-2">
           <div className="flex items-center gap-3 text-gray-600">
             <Clock className="h-4 w-4 text-blue-500 flex-shrink-0" />
             <span className="text-sm">
@@ -76,41 +86,44 @@ export default function ExamCard({ exam, onStartExam, loading }) {
           </div>
         </div>
 
-        {/* Status Badge */}
-        <div className="pt-2">
-          {exam.attempts_made >= exam.max_attempts ? (
-            <Badge className="bg-red-100 text-red-800 border-red-200 w-full justify-center py-2 text-xs font-medium mb-2">
-              Max Attempts Reached
-            </Badge>
-          ) : exam.show_results_immediately ? (
-            <Badge className="bg-green-100 text-green-800 border-green-200 w-full justify-center py-2 text-xs font-medium mb-2">
-              Instant Results
-            </Badge>
-          ) : (
-            <Badge className="bg-blue-100 text-blue-800 border-blue-200 w-full justify-center py-2 text-xs font-medium">
-              Results Later
-            </Badge>
-          )}
-        </div>
-
-        {/* Start Button */}
-        <Button
-          onClick={() => onStartExam(exam)}
-          disabled={exam.attempts_made >= exam.max_attempts || loading}
-          className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? (
-            <>
-              <span className="animate-spin mr-2">⏳</span>
-              Starting...
-            </>
-          ) : (
-            <>
-              <PlayCircle className="h-4 w-4 mr-2" />
-              Start Exam
-            </>
-          )}
-        </Button>
+        {/* Action Button */}
+        {hasInProgress ? (
+          <Button
+            onClick={() => onContinueExam ? onContinueExam(exam) : onStartExam(exam)}
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all cursor-pointer"
+          >
+            {loading ? (
+              <>
+                <span className="animate-spin mr-2">⏳</span>
+                Loading...
+              </>
+            ) : (
+              <>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Continue Exam
+              </>
+            )}
+          </Button>
+        ) : (
+          <Button
+            onClick={() => onStartExam(exam)}
+            disabled={exam.attempts_made >= exam.max_attempts || loading}
+            className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {loading ? (
+              <>
+                <span className="animate-spin mr-2">⏳</span>
+                Starting...
+              </>
+            ) : (
+              <>
+                <PlayCircle className="h-4 w-4 mr-2" />
+                Start Exam
+              </>
+            )}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

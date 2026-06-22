@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+  api:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
+    command: gunicorn api.wsgi:application --bind 0.0.0.0:8000 --workers 3
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./api/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+  celery_worker:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
+    command: celery -A api worker --loglevel=info --concurrency=1
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./api/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+  celery_beat:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
+    command: celery -A api beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./api/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+networks:
+  testgen_network:
+    driver: bridge

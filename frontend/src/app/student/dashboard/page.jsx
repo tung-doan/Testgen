@@ -19,7 +19,7 @@ import {
   Calendar,
   BarChart3,
 } from "lucide-react";
-// ✅ Import Chart.js
+// Import Chart.js
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -33,7 +33,7 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 
-// ✅ Register Chart.js components
+// Register Chart.js components
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -68,8 +68,9 @@ export default function StudentDashboard() {
     try {
       setLoading(true);
 
+      const userData = JSON.parse(localStorage.getItem("user") || "{}");
       const studentData = JSON.parse(localStorage.getItem("student") || "{}");
-      setStudentInfo(studentData);
+      setStudentInfo(userData);
 
       const studentId = studentData.id;
 
@@ -124,11 +125,11 @@ export default function StudentDashboard() {
     return "bg-red-100 text-red-800 border-red-200";
   };
 
-  // ✅ Prepare data for Line Chart
+ // Prepare data for Line Chart
   const getChartData = () => {
     if (completedExams.length === 0) return null;
 
-    // Sort by end_time
+ // Sort by end_time
     const sortedExams = [...completedExams].sort(
       (a, b) => new Date(a.end_time) - new Date(b.end_time),
     );
@@ -212,16 +213,8 @@ export default function StudentDashboard() {
               <div className="flex items-center justify-between px-6 py-6">
                 <div>
                   <CardTitle className="text-3xl mb-2">
-                    Welcome back, {studentInfo?.name || "Student"}! 👋
+                    Welcome back, {studentInfo?.username || "Student"}! 
                   </CardTitle>
-                  <p className="text-blue-100">
-                    {studentInfo?.classroom_name
-                      ? `Class: ${studentInfo.classroom_name}`
-                      : "No class assigned"}
-                  </p>
-                  <p className="text-blue-200 text-sm">
-                    Student ID: {studentInfo?.student_id || "N/A"}
-                  </p>
                 </div>
                 <div className="bg-white/20 p-4 rounded-full hidden md:block">
                   <BookOpen className="h-12 w-12" />
@@ -335,7 +328,7 @@ export default function StudentDashboard() {
                     {pendingExams.slice(0, 5).map((exam) => (
                       <div
                         key={exam.id}
-                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors mb-2"
                       >
                         <div className="flex-1">
                           <p className="font-medium text-gray-800 line-clamp-1">
@@ -375,7 +368,7 @@ export default function StudentDashboard() {
               </CardContent>
             </Card>
 
-            {/* ✅ Score Trend Chart */}
+            {/*  Score Trend Chart */}
             <Card className="border-0 shadow-xl !p-0">
               <CardHeader className="border-b bg-gradient-to-r from-green-50 to-emerald-50 rounded-t-lg">
                 <div className="flex items-center justify-between">
@@ -411,45 +404,6 @@ export default function StudentDashboard() {
               </CardContent>
             </Card>
           </div>
-
-          {/* Quick Actions */}
-          <Card className="border-0 shadow-xl !p-0">
-            <CardHeader className="border-b bg-gradient-to-r from-indigo-50 to-purple-50 rounded-t-lg">
-              <CardTitle className="flex items-center gap-2">
-                <div className="bg-indigo-100 p-2 rounded-lg">
-                  <BookOpen className="h-5 w-5 text-indigo-600" />
-                </div>
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Button
-                  onClick={() => router.push("/student/pending")}
-                  className="h-24 bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white flex flex-col items-center justify-center gap-2"
-                >
-                  <FileText className="h-6 w-6" />
-                  <span className="font-semibold">View Pending Tests</span>
-                </Button>
-
-                <Button
-                  onClick={() => router.push("/student/history")}
-                  className="h-24 bg-gradient-to-br from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white flex flex-col items-center justify-center gap-2"
-                >
-                  <BarChart3 className="h-6 w-6" />
-                  <span className="font-semibold">View History</span>
-                </Button>
-
-                <Button
-                  onClick={() => router.push("/student/classes")}
-                  className="h-24 bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white flex flex-col items-center justify-center gap-2"
-                >
-                  <BookOpen className="h-6 w-6" />
-                  <span className="font-semibold">My Classes</span>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </>

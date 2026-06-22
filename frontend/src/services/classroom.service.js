@@ -91,6 +91,17 @@ const ClassroomService = {
     }
   },
 
+  updateClassroom: async (classroomId, classroomData) => {
+    try {
+      const response = await apiClient.patch(`classroom/${classroomId}/`, classroomData);
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.detail || "Failed to update classroom"
+      );
+    }
+  },
+
   deleteClassroom: async (classroomId) => {
     try {
       const response = await apiClient.delete(`classroom/${classroomId}/`);

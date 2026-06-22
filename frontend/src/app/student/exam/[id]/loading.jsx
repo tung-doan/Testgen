@@ -22,21 +22,30 @@ export default function ExamLoading() {
       <div className="w-full bg-[#302f2fd1] px-14 py-6">
         <div className="flex gap-8">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-8 w-24 bg-gray-600/30 rounded animate-pulse" />
+            <div
+              key={i}
+              className="h-8 w-24 bg-gray-600/30 rounded animate-pulse"
+            />
           ))}
         </div>
       </div>
 
       {/* Content skeleton */}
-      <div className="py-8 px-4 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="pt-16 pb-12 px-4 max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-12">
           <div className="lg:col-span-1">
             <CardSkeleton />
           </div>
-          <div className="lg:col-span-3 space-y-6">
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
+          <div className="lg:col-span-3 space-y-12">
+            <div className="mt-4">
+              <CardSkeleton />
+            </div>
+            <div className="mt-4">
+              <CardSkeleton />
+            </div>
+            <div className="mt-4">
+              <CardSkeleton />
+            </div>
           </div>
         </div>
       </div>

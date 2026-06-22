@@ -10,6 +10,9 @@ import cloudinary
 import cloudinary.uploader
 import tempfile
 import requests
+import math
+import base64
+import time
 from exam.template_parser import (
     TemplateValidationError,
     get_threshold,
@@ -28,9 +31,14 @@ from exam.template_parser import (
 # Debug output directory
 DEBUG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', )
 
+# Set OMR_DEBUG=1 to enable debug image saves and verbose logs
+OMR_DEBUG = os.environ.get('OMR_DEBUG', '0') == '1'
+
 
 def _save_debug(filename, image):
-    """Save debug image to the api/ directory."""
+    """Save debug image to the api/ directory. Only runs when OMR_DEBUG=1."""
+    if not OMR_DEBUG:
+        return
     try:
         path = os.path.join(DEBUG_DIR, filename)
         cv2.imwrite(path, image)
@@ -39,7 +47,7 @@ def _save_debug(filename, image):
         print(f"[DEBUG] Failed to save {filename}: {e}")
 
 
-def get_paper_transform(image_path):
+def     get_paper_transform(image_path):
     """
     2-pass perspective transform pipeline:
     
@@ -54,9 +62,9 @@ def get_paper_transform(image_path):
     """
     image = cv2.imread(image_path)
     if image is None:
-        raise Exception(f"Cannot read image: {image_path}")
+        raise Exception("Cannot determine, please capture again.")
     
-    # Resize large images for faster processing
+ # Resize large images for faster processing
     max_dim = 1500
     h_orig, w_orig = image.shape[:2]
     if max(h_orig, w_orig) > max_dim:
@@ -67,9 +75,7 @@ def get_paper_transform(image_path):
     h_img, w_img = gray.shape
     img_area = h_img * w_img
     
-    # ==================================================================
-    # PASS 1: Find paper contour (rough alignment)
-    # ==================================================================
+ # PASS 1: Find paper contour (rough alignment)
     print("[OMR] === PASS 1: Paper contour detection ===")
     docCnt = None
     detection_method = "none"
@@ -77,30 +83,45 @@ def get_paper_transform(image_path):
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
     for attempt_name, edged in _get_edge_variants(blurred):
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
         closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
         
-        cnts = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+ # Use RETR_LIST to find all contours (not just the outermost ones which might be the image border)
+        cnts = cv2.findContours(closed.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
-        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:10]
         
         for c in cnts:
             peri = cv2.arcLength(c, True)
-            approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-            if len(approx) == 4:
-                area = cv2.contourArea(approx)
-                if area > img_area * 0.15:
-                    if _is_valid_paper_contour(approx, h_img, w_img):
-                        docCnt = approx
+            
+ # Try multiple epsilons to handle slightly curved edges from perspective/lens distortion
+            found_approx = None
+            for eps_mult in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06]:
+                approx = cv2.approxPolyDP(c, eps_mult * peri, True)
+                if len(approx) == 4:
+                    found_approx = approx
+                    break
+            
+            if found_approx is not None:
+                area = cv2.contourArea(found_approx)
+ # Reject if contour is too small, OR if it's too large (e.g. >98% area means it's the image border itself)
+                if img_area * 0.15 < area < img_area * 0.98:
+ # Also check if bounding box touches the very edge of the image
+                    bx, by, bw, bh = cv2.boundingRect(found_approx)
+                    if bw >= w_img - 10 and bh >= h_img - 10:
+                        continue # Skip image boundary
+                        
+                    if _is_valid_paper_contour(found_approx, h_img, w_img):
+                        docCnt = found_approx
                         detection_method = f"paper_contour({attempt_name})"
-                        print(f"[OMR] ✅ Pass 1: Found paper via {attempt_name}, area={area/img_area*100:.1f}%")
+                        print(f"[OMR]  Pass 1: Found paper via {attempt_name}, area={area/img_area*100:.1f}%")
                         break
         if docCnt is not None:
             break
     
     _save_debug("debug_edged.jpg", closed if docCnt is not None else edged)
     
-    # DEBUG: Save pass 1 result
+ # DEBUG: Save pass 1 result
     debug_paper = image.copy()
     if docCnt is not None:
         cnt_draw = docCnt.reshape(-1, 1, 2) if docCnt.ndim != 3 else docCnt
@@ -114,7 +135,7 @@ def get_paper_transform(image_path):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
     _save_debug("debug_detected_paper.jpg", debug_paper)
     
-    # Apply Pass 1 transform
+ # Apply Pass 1 transform
     if docCnt is not None:
         pts = docCnt.reshape(4, 2)
         paper_pass1 = four_point_transform(image, pts)
@@ -127,50 +148,80 @@ def get_paper_transform(image_path):
     
     _save_debug("debug_pass1_warped.jpg", paper_pass1)
     
-    # ==================================================================
-    # PASS 2: Find corner markers on the flattened image (precise alignment)
-    # ==================================================================
+ # PASS 2: Find corner markers on the flattened image (precise alignment)
     print("[OMR] === PASS 2: Corner marker refinement ===")
     
     markerCnt = _find_corner_markers(gray_pass1)
     
+ # CRITICAL FALLBACK:
+ # If Pass 1 incorrectly detected an inner printed box instead of the physical paper edge,
+ # the corner markers might have been cropped out! 
+ # If Pass 2 fails on the Pass 1 result, we retry Pass 2 on the original full image.
+    if markerCnt is None and docCnt is not None:
+        print("[OMR] ️ Pass 2 failed on Pass 1 crop. Pass 1 might have cropped too much. Retrying Pass 2 on FULL image...")
+        markerCnt_full = _find_corner_markers(gray)
+        if markerCnt_full is not None:
+            print("[OMR]  Pass 2 succeeded on full image! Discarding bad Pass 1 contour.")
+            detection_method = "full_image (Pass 1 discarded)"
+            paper_pass1 = image.copy()
+            gray_pass1 = gray.copy()
+            markerCnt = markerCnt_full
+            _save_debug("debug_pass1_warped.jpg", paper_pass1)
+    
+ # Target warp size — must match template coordinates exactly
+    target_w, target_h = 800, 1000
+    
     if markerCnt is not None:
         detection_method += " + markers"
-        pts2 = markerCnt.reshape(4, 2)
-        paper = four_point_transform(paper_pass1, pts2)
-        warped = four_point_transform(gray_pass1, pts2)
-        print(f"[OMR] ✅ Pass 2: Refined with markers → {warped.shape[1]}x{warped.shape[0]}")
+        pts2 = markerCnt.reshape(4, 2).astype(np.float32)
         
-        # DEBUG: Draw markers on pass1 image
+ # CRITICAL FIX: Map marker centers DIRECTLY to 800x1000 target.
+ # four_point_transform creates arbitrary output dimensions based on
+ # pixel distances, then resize introduces non-uniform scaling that
+ # misaligns bubble coordinates. Direct mapping ensures perfect sync
+ # with the template coordinate system.
+ # Ordering: TL, TR, BR, BL (same as _find_corner_markers output)
+        dst_pts = np.array([
+            [0, 0],              # TL marker center → pixel (0,0)
+            [target_w, 0],       # TR marker center → pixel (800,0)
+            [target_w, target_h], # BR marker center → pixel (800,1000)
+            [0, target_h],       # BL marker center → pixel (0,1000)
+        ], dtype=np.float32)
+        
+        M = cv2.getPerspectiveTransform(pts2, dst_pts)
+        paper = cv2.warpPerspective(paper_pass1, M, (target_w, target_h))
+        warped = cv2.warpPerspective(gray_pass1, M, (target_w, target_h))
+        _save_debug("debug_pass2_warped_color.jpg", paper)
+        print(f"[OMR]  Pass 2: Direct warp to {target_w}x{target_h} with marker alignment")
+        
+ # DEBUG: Draw markers on pass1 image
         debug_pass2 = paper_pass1.copy()
-        for pt in pts2:
+        for pt in pts2.astype(int):
             cv2.circle(debug_pass2, tuple(pt), 8, (0, 0, 255), -1)
-        cv2.drawContours(debug_pass2, [markerCnt.reshape(-1, 1, 2)], -1, (255, 0, 255), 2)
+        cv2.drawContours(debug_pass2, [markerCnt.reshape(-1, 1, 2).astype(np.int32)], -1, (255, 0, 255), 2)
         cv2.putText(debug_pass2, "Pass2: corner_markers", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         _save_debug("debug_pass2_markers.jpg", debug_pass2)
     else:
-        print("[OMR] ⚠️  Pass 2: No corner markers found, using Pass 1 result only")
-        paper = paper_pass1
-        warped = gray_pass1
+        print("[OMR]  Pass 2: No corner markers found. Aborting.")
+        raise Exception("Cannot determine, please capture again.")
     
     print(f"[OMR] Final detection: {detection_method}")
-    print(f"[OMR] Final warped size (before resize): {warped.shape[1]}x{warped.shape[0]}")
-    
-    # ==================================================================
-    # Resize to fixed target size (constant across all template tiers)
-    # ==================================================================
-    target_w, target_h = 800, 1000
-    try:
-        print(f"[OMR] Resizing → {target_w}x{target_h}")
-        paper = cv2.resize(paper, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-        warped = cv2.resize(warped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-    except Exception as e:
-        print(f"[OMR] WARNING: Could not resize to target: {e}")
+    print(f"[OMR] Final warped size: {warped.shape[1]}x{warped.shape[0]}")
 
-    thresh = cv2.threshold(warped, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+ # Adaptive Gaussian threshold for shadow-resistant binarization.
+ # Unlike OTSU (global threshold), adaptive computes a local threshold
+ # per-pixel neighborhood, so shadows don't create large black regions.
+ # Block size 51 covers ~6% of width (800px), large enough to span a
+ # bubble + surrounding paper. Constant 10 controls sensitivity.
+    thresh = cv2.adaptiveThreshold(warped, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, 51, 10)
+ # Also save CLAHE-enhanced for debug
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    warped_enhanced = clahe.apply(warped)
     
     _save_debug("debug_thresh.jpg", thresh)
+    _save_debug("debug_clahe.jpg", warped_enhanced)
     
     return paper, warped, thresh
 
@@ -180,20 +231,20 @@ def _get_edge_variants(blurred):
     Generate multiple edge detection results to try.
     Yields: (name, edge_image) tuples.
     """
-    # Variant 1: Canny with moderate thresholds
+ # Variant 1: Canny with moderate thresholds
     for low, high in [(30, 100), (50, 150), (75, 200)]:
         edged = cv2.Canny(blurred, low, high)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         edged = cv2.dilate(edged, kernel, iterations=2)
         yield f"canny({low},{high})", edged
     
-    # Variant 2: Adaptive threshold → edge-like result
+ # Variant 2: Adaptive threshold → edge-like result
     thresh_adapt = cv2.adaptiveThreshold(
         blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
     )
     yield "adaptive", thresh_adapt
     
-    # Variant 3: Simple threshold (good when paper is very white on dark bg)
+ # Variant 3: Simple threshold (good when paper is very white on dark bg)
     _, simple = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     yield "otsu", simple
 
@@ -205,55 +256,262 @@ def _is_valid_paper_contour(approx, img_h, img_w):
     """
     pts = approx.reshape(4, 2).astype(float)
     
-    # Calculate bounding rect
+ # Calculate bounding rect
     x, y, w, h = cv2.boundingRect(approx)
     if w == 0 or h == 0:
         return False
     
-    # Aspect ratio of bounding rect should be paper-like (0.5 to 2.0)
+ # Aspect ratio of bounding rect should be paper-like (0.3 to 3.0)
     ar = w / float(h)
     if ar < 0.3 or ar > 3.0:
         return False
     
-    # The contour area should be a reasonable fraction of its bounding rect
-    # (i.e., it's roughly rectangular, not a thin triangle)
+ # Calculate physical edge lengths of the 4-point contour
+    def dist(p1, p2): return np.linalg.norm(p1 - p2)
+    l1 = dist(pts[0], pts[1])
+    l2 = dist(pts[1], pts[2])
+    l3 = dist(pts[2], pts[3])
+    l4 = dist(pts[3], pts[0])
+    
+ # Estimate width and height
+    w_est = (l1 + l3) / 2
+    h_est = (l2 + l4) / 2
+    if w_est == 0 or h_est == 0: return False
+    
+    ar_est = w_est / h_est
+ # A4 ratio is ~0.707 (portrait) or ~1.414 (landscape). Allow a reasonable range (0.5 to 0.9 or 1.1 to 1.9)
+    if not (0.5 < ar_est < 0.92 or 1.05 < ar_est < 1.95):
+        return False
+        
+ # The contour area should be a reasonable fraction of its bounding rect
+ # (i.e., it's roughly rectangular, not a thin triangle)
+ # Lowered from 0.5 to 0.35 to allow for papers photographed at an angle (perspective + rotation)
     contour_area = cv2.contourArea(approx)
     rect_area = w * h
     fill_ratio = contour_area / rect_area if rect_area > 0 else 0
-    if fill_ratio < 0.5:  # Less than 50% fill = not rectangular enough
+    if fill_ratio < 0.35:  # Less than 35% fill = not rectangular enough
         return False
     
     return True
 
 
+def _validate_marker_geometry(marker_data, get_point_fn, img_w, img_h):
+    """
+    Validate that 4 detected markers form a reasonable paper rectangle.
+    
+    Checks:
+    1. Marker sizes are consistent (all real markers are printed at the same size)
+    2. The quadrilateral has proper paper aspect ratio (~0.7-0.85 for A4)
+    3. Opposite edges are roughly parallel
+    
+    If an outlier is found, remove it so 3-point estimation handles it instead.
+    Returns: marker_data dict (possibly with 1 marker removed)
+    """
+    names = ['TL', 'TR', 'BL', 'BR']
+    if not all(n in marker_data for n in names):
+        return marker_data
+    
+ # --- Check 1: Marker size consistency ---
+ # All 4 markers on the paper are printed at the same size.
+ # A false positive (desk object) will usually be a very different size.
+    areas = {}
+    for name in names:
+        m = marker_data[name]
+        areas[name] = m['bw'] * m['bh']
+    
+    avg_area = np.mean(list(areas.values()))
+    size_outlier = None
+    max_size_ratio = 0
+    
+    for name, area in areas.items():
+        ratio = max(area / avg_area, avg_area / area) if avg_area > 0 else 999
+        if ratio > max_size_ratio:
+            max_size_ratio = ratio
+            if ratio > 2.5:  # More than 2.5x difference from average
+                size_outlier = name
+    
+    if size_outlier:
+        print(f"[OMR] ️  Marker size outlier: {size_outlier} "
+              f"(area={areas[size_outlier]}, avg={avg_area:.0f}, ratio={max_size_ratio:.1f}x)")
+        del marker_data[size_outlier]
+        return marker_data
+    
+ # --- Check 2: Quadrilateral geometry ---
+    tl = np.array(get_point_fn('TL', marker_data['TL']))
+    tr = np.array(get_point_fn('TR', marker_data['TR']))
+    bl = np.array(get_point_fn('BL', marker_data['BL']))
+    br = np.array(get_point_fn('BR', marker_data['BR']))
+    
+ # Top edge and bottom edge lengths
+    top_len = np.linalg.norm(tr - tl)
+    bottom_len = np.linalg.norm(br - bl)
+    left_len = np.linalg.norm(bl - tl)
+    right_len = np.linalg.norm(br - tr)
+    
+    if top_len < 1 or bottom_len < 1 or left_len < 1 or right_len < 1:
+        return marker_data
+    
+ # Paper aspect ratio: width/height should be ~0.7-0.85 for A4 portrait
+ # Allow wider range (0.55 to 1.0) to account for perspective distortion
+    avg_width = (top_len + bottom_len) / 2
+    avg_height = (left_len + right_len) / 2
+    aspect = avg_width / avg_height if avg_height > 0 else 0
+    
+    if not (0.50 <= aspect <= 1.1):
+        print(f"[OMR] ️  Bad aspect ratio: {aspect:.3f} (expected 0.50-1.10)")
+ # Find which marker is causing the distortion by checking which removal
+ # gives the best estimated rectangle from the remaining 3
+        worst_name = _find_geometry_outlier(marker_data, get_point_fn)
+        if worst_name:
+            print(f"[OMR] Removing geometric outlier: {worst_name}")
+            del marker_data[worst_name]
+            return marker_data
+    
+ # --- Check 3: Edge parallelism ---
+ # Top and bottom edges should be roughly parallel (angle < 15°)
+ # Same for left and right edges
+    top_vec = tr - tl
+    bottom_vec = br - bl
+    left_vec = bl - tl
+    right_vec = br - tr
+    
+    def _angle_between(v1, v2):
+        """Angle in degrees between two vectors."""
+        cos_a = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
+        cos_a = np.clip(cos_a, -1, 1)
+        return np.degrees(np.arccos(cos_a))
+    
+    h_angle = _angle_between(top_vec, bottom_vec)
+    v_angle = _angle_between(left_vec, right_vec)
+    
+    if h_angle > 20 or v_angle > 20:
+        print(f"[OMR] ️  Edges not parallel: h_angle={h_angle:.1f}°, v_angle={v_angle:.1f}°")
+        worst_name = _find_geometry_outlier(marker_data, get_point_fn)
+        if worst_name:
+            print(f"[OMR] Removing geometric outlier: {worst_name}")
+            del marker_data[worst_name]
+            return marker_data
+    
+ # --- Check 4: Edge length ratios ---
+ # Opposite edges should have similar lengths (ratio < 1.5)
+    h_ratio = max(top_len, bottom_len) / min(top_len, bottom_len)
+    v_ratio = max(left_len, right_len) / min(left_len, right_len)
+    
+    if h_ratio > 1.5 or v_ratio > 1.5:
+        print(f"[OMR] ️  Edge length mismatch: h_ratio={h_ratio:.2f}, v_ratio={v_ratio:.2f}")
+        worst_name = _find_geometry_outlier(marker_data, get_point_fn)
+        if worst_name:
+            print(f"[OMR] Removing geometric outlier: {worst_name}")
+            del marker_data[worst_name]
+            return marker_data
+    
+    print(f"[OMR]  Marker geometry valid: aspect={aspect:.3f}, "
+          f"h_angle={h_angle:.1f}°, v_angle={v_angle:.1f}°, "
+          f"h_ratio={h_ratio:.2f}, v_ratio={v_ratio:.2f}")
+    return marker_data
+
+
+def _find_geometry_outlier(marker_data, get_point_fn):
+    """
+    Find which marker, when removed, yields the best parallelogram
+    from the remaining 3 points (estimated 4th via vector addition).
+    
+    For each candidate removal, estimate the missing corner and compute
+    the aspect ratio of the resulting quadrilateral. The removal that
+    gives an aspect ratio closest to 0.75 (A4 portrait) wins.
+    """
+    names = ['TL', 'TR', 'BL', 'BR']
+    pts = {n: np.array(get_point_fn(n, marker_data[n])) for n in names}
+    
+    best_name = None
+    best_score = float('inf')
+    target_aspect = 0.75  # A4 paper
+    
+    for remove_name in names:
+        remaining = [n for n in names if n != remove_name]
+        p = {n: pts[n] for n in remaining}
+        
+ # Estimate the missing corner using parallelogram property
+        a, b, c = remaining  # 3 remaining corners
+        
+ # Try to estimate the 4th point
+        if remove_name == 'BR':
+            est = pts['TR'] + pts['BL'] - pts['TL']
+        elif remove_name == 'BL':
+            est = pts['TL'] + pts['BR'] - pts['TR']
+        elif remove_name == 'TR':
+            est = pts['TL'] + pts['BR'] - pts['BL']
+        elif remove_name == 'TL':
+            est = pts['TR'] + pts['BL'] - pts['BR']
+        
+ # Compute aspect ratio with estimated point
+        all_pts = dict(p)
+        all_pts[remove_name] = est
+        
+        tl, tr = all_pts['TL'], all_pts['TR']
+        bl, br = all_pts['BL'], all_pts['BR']
+        
+        avg_w = (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2
+        avg_h = (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2
+        
+        if avg_h < 1:
+            continue
+        
+        aspect = avg_w / avg_h
+        score = abs(aspect - target_aspect)
+        
+        if score < best_score:
+            best_score = score
+            best_name = remove_name
+    
+    return best_name
+
+
 def _find_corner_markers(gray):
     """
     Try to find 4 black square corner markers in the image.
-    Uses adaptive thresholding + multiple threshold levels for robustness.
-    
-    KEY: For perspective transform, we use the OUTER CORNER of each marker
-    (not the center), because the outer corners define the paper boundary.
-    - TL marker → use its top-left corner
-    - TR marker → use its top-right corner  
-    - BL marker → use its bottom-left corner
-    - BR marker → use its bottom-right corner
-    
-    Returns: 4-point contour (numpy array) or None
+    Uses CLAHE preprocessing + multiple threshold levels for robustness.
+
+    KEY FILTER: Markers are black squares ON WHITE PAPER. The surrounding
+    pixels (just outside the marker) must be bright (paper surface, >140).
+    This eliminates false positives from dark objects on the desk.
+
+    Returns: 4-point contour (numpy array of float32) or None
     """
     h, w = gray.shape
 
-    # Try multiple threshold values — bottom corners may be under shadow
-    threshold_levels = [40, 60, 80, 100, 120]
+ # Expected marker size: ~0.6cm on A4 width (21cm) => ~2.8% of paper width
+ # BUT if the photo is taken from far away, the paper might only occupy 30-40% of the image width.
+ # We must broaden the acceptable range to allow for small papers in large images.
+    short_side = min(w, h)
+    min_marker_dim = max(5, int(short_side * 0.008))  # Works if paper is ~30% of the image width
+    max_marker_dim = max(15, int(short_side * 0.060)) # Works if paper is ~100% of the image width (close up)
+    min_area = min_marker_dim ** 2
+    max_area = max_marker_dim ** 2
 
-    # Store both center (for scoring) and bounding box (for outer corner)
-    marker_data = {}  # name -> (center_x, center_y, bx_global, by_global, bw, bh)
+    print(f"[OMR] Marker detection: image={w}x{h}, expected marker size={min_marker_dim}-{max_marker_dim}px")
+
+ # CLAHE to normalize contrast (handles shadows on corners)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+ # Try multiple threshold values — bottom corners may be under shadow
+    threshold_levels = [40, 60, 80, 100, 120, 140]
+
+ # Store marker data
+    marker_data = {}
 
     for thresh_val in threshold_levels:
-        _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(enhanced, thresh_val, 255, cv2.THRESH_BINARY_INV)
 
-        # Search zone: 30% from each edge
-        corner_size_y = int(h * 0.30)
-        corner_size_x = int(w * 0.30)
+ # Morphological open to remove thin noise (text, lines)
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
+
+ # Search zone: 40% from each edge (wider than 25% to handle photos
+ # where paper occupies only ~60% of the image with desk visible)
+        corner_size_y = int(h * 0.40)
+        corner_size_x = int(w * 0.40)
 
         corners = {
             'TL': (0, 0, corner_size_x, corner_size_y),
@@ -268,55 +526,176 @@ def _find_corner_markers(gray):
 
             region = binary[y1:y2, x1:x2]
 
-            # Morphological closing to fill holes in corner markers
+ # Morphological closing to fill holes in corner markers
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
             region = cv2.morphologyEx(region, cv2.MORPH_CLOSE, kernel)
 
             cnts = cv2.findContours(region.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cnts = imutils.grab_contours(cnts)
 
-            best_marker = None
-            best_score = 0
+            candidates = []
 
             for c in cnts:
                 area = cv2.contourArea(c)
-                if area < 50:
+                if area < min_area or area > max_area:
                     continue
                 (bx, by, bw, bh) = cv2.boundingRect(c)
+                if bw < min_marker_dim or bh < min_marker_dim:
+                    continue
+                if bw > max_marker_dim or bh > max_marker_dim:
+                    continue
                 ar = bw / float(bh) if bh > 0 else 0
-                if 0.5 <= ar <= 2.0:
-                    squareness = 1.0 - abs(1.0 - ar)
-                    score = area * squareness
-                    if score > best_score:
-                        best_score = score
-                        # Store bounding box in GLOBAL coordinates
-                        best_marker = {
-                            'bx': x1 + bx,
-                            'by': y1 + by, 
-                            'bw': bw,
-                            'bh': bh,
-                        }
+                if not (0.6 <= ar <= 1.7):
+                    continue
+ # Solidity check (square should be very solid)
+                hull_area = cv2.contourArea(cv2.convexHull(c))
+                solidity = area / hull_area if hull_area > 0 else 0
+                if solidity < 0.85:
+                    continue
+ # Fill ratio (square should fill its bounding box)
+                bbox_area = bw * bh
+                fill = area / bbox_area if bbox_area > 0 else 0
+                if fill < 0.75:
+                    continue
 
-            if best_marker:
-                marker_data[name] = best_marker
+ # KEY: Surrounding brightness — marker must be on PAPER
+ # Sample CLAHE-enhanced image (shadow-normalized) in a ring
+ # around the marker. Uses two checks:
+ # 1. Absolute brightness (surround > 100) — catches most cases
+ # 2. Contrast (surround - interior > 15) — catches shadowed areas
+ # A candidate must pass at least one check.
+                margin = max(5, max(bw, bh) // 2)
+                gx, gy = x1 + bx, y1 + by  # global coordinates
+
+                surround_pixels = []
+ # Top strip
+                ty1, ty2 = max(0, gy - margin), gy
+                if ty1 < ty2:
+                    s = enhanced[ty1:ty2, max(0, gx):min(w, gx + bw)]
+                    if s.size > 0: surround_pixels.extend(s.flatten().tolist())
+ # Bottom strip
+                by1, by2 = gy + bh, min(h, gy + bh + margin)
+                if by1 < by2:
+                    s = enhanced[by1:by2, max(0, gx):min(w, gx + bw)]
+                    if s.size > 0: surround_pixels.extend(s.flatten().tolist())
+ # Left strip
+                lx1, lx2 = max(0, gx - margin), gx
+                if lx1 < lx2:
+                    s = enhanced[max(0, gy):min(h, gy + bh), lx1:lx2]
+                    if s.size > 0: surround_pixels.extend(s.flatten().tolist())
+ # Right strip
+                rx1, rx2 = gx + bw, min(w, gx + bw + margin)
+                if rx1 < rx2:
+                    s = enhanced[max(0, gy):min(h, gy + bh), rx1:rx2]
+                    if s.size > 0: surround_pixels.extend(s.flatten().tolist())
+
+                if len(surround_pixels) < 10:
+                    continue
+
+                avg_surround = float(np.mean(surround_pixels))
+ # Contrast check: surround must be brighter than marker interior
+ # Use original gray to check true ink intensity, preventing CLAHE from skewing shadows
+                interior_roi = gray[gy:gy+bh, gx:gx+bw]
+                avg_interior = float(np.mean(interior_roi)) if interior_roi.size > 0 else 255
+                std_interior = float(np.std(interior_roi)) if interior_roi.size > 0 else 255
+                
+ # A true printed marker is a solid block of black ink.
+ # It should be dark and have very little texture/variance.
+ # Non-markers (like cars, pens, complex shadows) have texture (high std) or aren't black enough.
+                if avg_interior > 130:
+                    continue
+                if std_interior > 40:
+                    continue
+                    
+                contrast = avg_surround - avg_interior
+ # shadowed paper where marker is still clearly darker than paper.
+ # Dark objects on desk have low surround AND low contrast → rejected.
+                is_bright = avg_surround >= 90
+                is_shadowed_paper = avg_surround >= 70 and contrast >= 25
+                if not (is_bright or is_shadowed_paper):
+                    continue
+
+                squareness = 1.0 - abs(1.0 - ar)
+                base_score = area * squareness * solidity * fill * (avg_surround / 255.0)
+
+ # Penalize candidates that are far from the actual corner.
+ # Since the search zone is 40%, inner bubbles might be picked if not penalized.
+                cx, cy = gx + bw / 2.0, gy + bh / 2.0
+                dist_x, dist_y = 0, 0
+                if name == 'TL':
+                    dist_x, dist_y = cx, cy
+                elif name == 'TR':
+                    dist_x, dist_y = w - cx, cy
+                elif name == 'BL':
+                    dist_x, dist_y = cx, h - cy
+                elif name == 'BR':
+                    dist_x, dist_y = w - cx, h - cy
+
+ # Normalize distance against the search zone size (1.0 = at corner, 0.0 = at inner edge)
+                norm_x = min(1.0, dist_x / corner_size_x)
+                norm_y = min(1.0, dist_y / corner_size_y)
+                dist_penalty = max(0.1, 1.0 - ((norm_x + norm_y) / 2.0))
+
+ # Hard reject candidates too far from the corner zone center.
+                if dist_penalty <= 0.2:
+                    continue
+
+ # Strongly penalize inner candidates to avoid bubble false positives.
+                score = base_score * (dist_penalty ** 4)
+
+                candidates.append({
+                    'bx': gx, 'by': gy, 'bw': bw, 'bh': bh,
+                    'score': score, 'surround': avg_surround,
+                })
+
+            if candidates:
+                best = max(candidates, key=lambda c: c['score'])
+                marker_data[name] = best
+                print(f"[OMR]   {name}: ({best['bx']},{best['by']}) "
+                      f"size={best['bw']}x{best['bh']} "
+                      f"surround={best['surround']:.0f} thresh={thresh_val}")
 
         if len(marker_data) == 4:
             break
 
     print(f"[OMR] Corner markers found: {list(marker_data.keys())} / 4")
     for name, m in marker_data.items():
-        print(f"[OMR]   {name}: bbox=({m['bx']},{m['by']}) size={m['bw']}x{m['bh']}")
+        cx = m['bx'] + m['bw'] / 2.0
+        cy = m['by'] + m['bh'] / 2.0
+        print(f"[OMR]   {name}: bbox=({m['bx']},{m['by']}) size={m['bw']}x{m['bh']} center=({cx:.1f},{cy:.1f})")
 
-    # Build the 4-point contour using CENTER of each marker.
-    # Center gives the most stable reference point:
-    # - Outer corner extends into the background when markers are near image edges
-    # - Center is always on the paper, giving a clean warp
-    def _get_marker_point(name, m):
-        """Return the center point of a marker."""
+ # DEBUG: Save marker detection visualization
+    debug_markers = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    for name, m in marker_data.items():
         bx, by, bw, bh = m['bx'], m['by'], m['bw'], m['bh']
-        return (bx + bw // 2, by + bh // 2)
+        cx = int(bx + bw / 2.0)
+        cy = int(by + bh / 2.0)
+        cv2.rectangle(debug_markers, (bx, by), (bx + bw, by + bh), (0, 255, 0), 2)
+        cv2.circle(debug_markers, (cx, cy), 4, (0, 0, 255), -1)
+        cv2.putText(debug_markers, name, (bx, by - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    _save_debug("debug_marker_boxes.jpg", debug_markers)
 
-    # ===== CASE 1: All 4 corners found =====
+ # Build the 4-point contour using CENTER of each marker.
+ # Center gives the most stable reference point:
+ # - Outer corner extends into the background when markers are near image edges
+ # - Center is always on the paper, giving a clean warp
+    def _get_marker_point(name, m):
+        """Return the center point of a marker with sub-pixel accuracy."""
+        bx, by, bw, bh = m['bx'], m['by'], m['bw'], m['bh']
+ # Use float division for sub-pixel accuracy — integer division
+ # introduces up to 0.5px error per marker, which gets amplified
+ # to ~2-3px drift on the far side after perspective warp
+        return (bx + bw / 2.0, by + bh / 2.0)
+
+ # GEOMETRIC VALIDATION: Detect and remove false-positive markers
+ # When Pass 1 fails (no paper contour, full image used), the search
+ # zones include desk area. Dark objects on bright desk can pass the
+ # brightness filter. We validate that the 4 markers form a reasonable
+ # rectangle matching paper proportions.
+    if len(marker_data) == 4:
+        marker_data = _validate_marker_geometry(marker_data, _get_marker_point, w, h)
+
     if len(marker_data) == 4:
         pts = np.array([
             _get_marker_point('TL', marker_data['TL']),
@@ -324,48 +703,10 @@ def _find_corner_markers(gray):
             _get_marker_point('BR', marker_data['BR']),
             _get_marker_point('BL', marker_data['BL']),
         ], dtype=np.float32)
-        print(f"[OMR] ✅ 4 corners (center): TL={pts[0].tolist()}, TR={pts[1].tolist()}, BR={pts[2].tolist()}, BL={pts[3].tolist()}")
-        return pts.reshape(4, 1, 2).astype(np.int32)
+        print(f"[OMR]  4 corners (center): TL={pts[0].tolist()}, TR={pts[1].tolist()}, BR={pts[2].tolist()}, BL={pts[3].tolist()}")
+        return pts.reshape(4, 1, 2).astype(np.float32)
 
-    # ===== CASE 2: 3 corners found — estimate the missing one =====
-    if len(marker_data) == 3:
-        missing = [k for k in ['TL', 'TR', 'BL', 'BR'] if k not in marker_data]
-        missing_name = missing[0]
-        print(f"[OMR] ⚠️  Only 3 corners found, estimating '{missing_name}'")
-
-        # Get center points for found markers
-        found_pts = {}
-        for name in marker_data:
-            found_pts[name] = _get_marker_point(name, marker_data[name])
-
-        tl = found_pts.get('TL')
-        tr = found_pts.get('TR')
-        bl = found_pts.get('BL')
-        br = found_pts.get('BR')
-
-        if missing_name == 'BR' and tl and tr and bl:
-            est = (tr[0] + bl[0] - tl[0], tr[1] + bl[1] - tl[1])
-        elif missing_name == 'BL' and tl and tr and br:
-            est = (tl[0] + br[0] - tr[0], tl[1] + br[1] - tr[1])
-        elif missing_name == 'TR' and tl and bl and br:
-            est = (tl[0] + br[0] - bl[0], tl[1] + br[1] - bl[1])
-        elif missing_name == 'TL' and tr and bl and br:
-            est = (tr[0] + bl[0] - br[0], tr[1] + bl[1] - br[1])
-        else:
-            return None
-
-        est = (max(0, min(w - 1, est[0])), max(0, min(h - 1, est[1])))
-        found_pts[missing_name] = est
-        print(f"[OMR] Estimated '{missing_name}' at: {est}")
-
-        pts = np.array([
-            found_pts['TL'],
-            found_pts['TR'],
-            found_pts['BR'],
-            found_pts['BL'],
-        ], dtype=np.float32)
-        return pts.reshape(4, 1, 2).astype(np.int32)
-
+ # Return None if not exactly 4 markers are found
     return None
 
 
@@ -390,7 +731,7 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
     if h == 0 or w == 0:
         return [None] * num_digits
 
-    # ---- Step 1: Auto-detect column X boundaries from histogram ----
+ # ---- Step 1: Auto-detect column X boundaries from histogram ----
     col_sums = np.sum(thresh_region > 0, axis=0).astype(np.float32)
     ks = max(3, w // (num_digits * 8))
     col_smooth = np.convolve(col_sums, np.ones(ks) / ks, mode='same')
@@ -418,20 +759,19 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
                 [[i * (w // num_digits), (i + 1) * (w // num_digits) - 1] for i in range(num_digits)]
     print(f"[OMR]   columns ({num_digits}): {col_bands}")
 
-    # ---- Step 2: Determine header end Y ----
-    # The crop region contains: 1 header row (input boxes) + 10 bubble rows (digits 0-9)
-    # Total = 11 rows. Each row height = h / 11.
-    # header_end_y = 1 * (h/11)  ← end of the header input box row
-    #
-    # From debug images (210x230 region): h/11 = 230/11 ≈ 20.9px per row
-    # Header box row occupies y=0..20, bubble rows start at y=21.
-    # This formula is reliable and needs no contour/density detection.
+ # ---- Step 2: Determine header end Y ----
+ # The crop region contains: 1 header row (input boxes) + 10 bubble rows (digits 0-9)
+ # Total = 11 rows. Each row height = h / 11.
+ # header_end_y = 1 * (h/11) ← end of the header input box row
+ # From debug images (210x230 region): h/11 = 230/11 ≈ 20.9px per row
+ # Header box row occupies y=0..20, bubble rows start at y=21.
+ # This formula is reliable and needs no contour/density detection.
     row_slot_h = h / 11.0          # height of each of the 11 slots
     header_end_y = int(row_slot_h)  # end of slot 0 (the header row)
 
     print(f"[OMR]   row_slot={row_slot_h:.1f}px, header_end_y={header_end_y}, bubbles={h-header_end_y}px")
 
-    # ---- Step 3: Divide remaining 10 slots into bubble rows ----
+ # ---- Step 3: Divide remaining 10 slots into bubble rows ----
     bubble_rows = []
     for i in range(10):
         ry1 = int(header_end_y + i * row_slot_h)
@@ -441,9 +781,9 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
     print(f"[OMR]   rows: {[(r[0],r[1]) for r in bubble_rows]}")
 
 
-    # ---- Step 4: Per column, find the most filled row ----
-    # Key insight from debug: empty bubble rings = ~75-100px, filled bubbles = ~200-280px
-    # Use RELATIVE comparison: filled = significantly above median of all rows in column
+ # ---- Step 4: Per column, find the most filled row ----
+ # Key insight from debug: empty bubble rings = ~75-100px, filled bubbles = ~200-280px
+ # Use RELATIVE comparison: filled = significantly above median of all rows in column
     detected_digits = []
     per_col_fills = []
 
@@ -461,15 +801,15 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
         per_col_fills.append(row_fills)
         fills_str = ', '.join(f'{f:4d}' for f in row_fills)
 
-        # Find filled bubble: must be the MAX and be significantly above the median
+ # Find filled bubble: must be the MAX and be significantly above the median
         max_fill = max(row_fills) if row_fills else 0
         median_fill = float(np.median(row_fills)) if row_fills else 0
 
         best_digit = None
-        # A filled bubble must be:
-        # 1. At least fill_threshold pixels absolute
-        # 2. At least fill_ratio × the median (separates solid fill from ring borders)
-        # 3. The maximum in the column
+ # A filled bubble must be:
+ # 1. At least fill_threshold pixels absolute
+ # 2. At least fill_ratio × the median (separates solid fill from ring borders)
+ # 3. The maximum in the column
         if max_fill >= fill_threshold and median_fill > 0 and max_fill >= median_fill * fill_ratio:
             best_row = int(np.argmax(row_fills))
             best_digit = str(best_row)
@@ -478,22 +818,22 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
         print(f"[OMR]   col{col_idx}(x={cx1}:{cx2}) digit={best_digit} max={max_fill} median={median_fill:.0f} fills=[{fills_str}]")
 
 
-    # ---- Step 5: Save annotated debug grid image ----
+ # ---- Step 5: Save annotated debug grid image ----
     if debug_name:
         debug_img = cv2.cvtColor(thresh_region, cv2.COLOR_GRAY2BGR)
-        # Draw header end line (yellow)
+ # Draw header end line (yellow)
         cv2.line(debug_img, (0, header_end_y), (w, header_end_y), (0, 255, 255), 1)
-        # Draw row grid lines (blue)
+ # Draw row grid lines (blue)
         for ry1, ry2 in bubble_rows:
             cv2.line(debug_img, (0, ry1), (w, ry1), (255, 100, 0), 1)
-        # Draw last row bottom
+ # Draw last row bottom
         if bubble_rows:
             cv2.line(debug_img, (0, bubble_rows[-1][1]), (w, bubble_rows[-1][1]), (255, 100, 0), 1)
-        # Draw column lines (green)
+ # Draw column lines (green)
         for cx1, cx2 in col_bands:
             cv2.line(debug_img, (cx1, 0), (cx1, h), (0, 200, 0), 1)
             cv2.line(debug_img, (cx2, 0), (cx2, h), (0, 200, 0), 1)
-        # Mark detected digit per column (red dot on detected row)
+ # Mark detected digit per column (red dot on detected row)
         for col_idx, (digit, (cx1, cx2)) in enumerate(zip(detected_digits, col_bands)):
             if digit is not None:
                 row_idx = int(digit)
@@ -508,9 +848,7 @@ def _detect_bubble_digits(thresh_region, num_digits, column_width=60, digit_crop
     return detected_digits
 
 
-# ==============================================================================
 # v2.0 GRID-BASED SCANNING (with timing mark Y-calibration)
-# ==============================================================================
 
 def _calibrate_timing_marks(thresh, template):
     """
@@ -536,7 +874,7 @@ def _calibrate_timing_marks(thresh, template):
         ex = tm['x']
         ey = tm['y']
 
-        # Define search ROI
+ # Define search ROI
         x1 = max(0, int(ex - search_x_margin))
         x2 = min(w, int(ex + tm_w + search_x_margin))
         y1 = max(0, int(ey - search_y_margin))
@@ -547,22 +885,21 @@ def _calibrate_timing_marks(thresh, template):
 
         roi = thresh[y1:y2, x1:x2]
 
-        # Vertical projection: sum white pixels per row
+ # Vertical projection: sum white pixels per row
         row_sums = np.sum(roi > 0, axis=1).astype(np.float32)
 
-        # The timing mark should be a strong black blob → high sum in thresh_inv
+ # The timing mark should be a strong black blob → high sum in thresh_inv
         peak = np.max(row_sums)
         if peak < tm_w * 0.3:
-            # Mark not found in this ROI
+ # Mark not found in this ROI
             continue
 
-        # Find connected run of high-density rows (the mark body)
+ # Find connected run of high-density rows (the mark body)
         threshold = peak * 0.4
         active_rows = np.where(row_sums > threshold)[0]
         if len(active_rows) == 0:
             continue
 
-        # Centroid of active rows = actual Y center
         actual_center_local = np.mean(active_rows)
         actual_y = y1 + actual_center_local
 
@@ -590,21 +927,116 @@ def _sample_bubble_fill(thresh, cx, cy, radius):
     h, w = thresh.shape
     ix, iy, ir = int(round(cx)), int(round(cy)), int(round(radius))
 
-    # Bounds check
+ # Bounds check
     if ix - ir < 0 or ix + ir >= w or iy - ir < 0 or iy + ir >= h:
         return 0
 
-    # Create circular mask
+ # Create circular mask
     mask = np.zeros((2 * ir + 1, 2 * ir + 1), dtype=np.uint8)
     cv2.circle(mask, (ir, ir), ir, 255, -1)
 
-    # Extract ROI and apply mask
+ # Extract ROI and apply mask
     roi = thresh[iy - ir:iy + ir + 1, ix - ir:ix + ir + 1]
     if roi.shape != mask.shape:
         return 0
 
     masked = cv2.bitwise_and(roi, roi, mask=mask)
     return int(np.sum(masked > 0))
+
+def _precompute_ring_response(thresh, bubble_radius):
+    """
+    Precompute ring overlap map using cv2.filter2D (single optimized C++ call).
+    ring_response[y, x] = count of white thresh pixels under the ring mask at (x,y).
+    Replaces thousands of ROI extractions with simple array lookups.
+    """
+    ir = int(round(bubble_radius))
+    if ir < 3:
+        return np.zeros_like(thresh, dtype=np.float32)
+    ring_kernel = np.zeros((2 * ir + 1, 2 * ir + 1), dtype=np.float32)
+    cv2.circle(ring_kernel, (ir, ir), ir, 1.0, -1)
+    cv2.circle(ring_kernel, (ir, ir), max(1, ir - 2), 0.0, -1)
+    thresh_f = (thresh > 0).astype(np.float32)
+    return cv2.filter2D(thresh_f, -1, ring_kernel)
+
+
+def _align_column_xy(ring_response, cx, row_ys, bubble_radius, max_shift_x=10, max_shift_y=12):
+    """Find local X/Y shifts using precomputed ring_response (array lookups only)."""
+    h, w = ring_response.shape
+    ir = int(round(bubble_radius))
+    if ir < 3: return (0, 0)
+    ix_base = int(round(cx))
+
+ # Independent Y search
+    best_dy, max_fill = 0, -1.0
+    for dy in range(-max_shift_y, max_shift_y + 1):
+        total = 0.0
+        for cy in row_ys:
+            iy = int(round(cy + dy))
+            if 0 <= iy < h and 0 <= ix_base < w:
+                total += ring_response[iy, ix_base]
+        if total > max_fill:
+            max_fill = total
+            best_dy = dy
+
+ # Independent X search using best_dy
+    best_dx, max_fill = 0, -1.0
+    for dx in range(-max_shift_x, max_shift_x + 1):
+        ix = ix_base + dx
+        if ix < 0 or ix >= w: continue
+        total = 0.0
+        for cy in row_ys:
+            iy = int(round(cy + best_dy))
+            if 0 <= iy < h:
+                total += ring_response[iy, ix]
+        if total > max_fill:
+            max_fill = total
+            best_dx = dx
+    return best_dx, best_dy
+
+
+def _align_block_xy(ring_response, block, y_corrections, bubble_radius, max_shift_x=10, max_shift_y=12):
+    """Find local X/Y shifts for entire block using precomputed ring_response."""
+    origin_x = block['origin']['x']
+    origin_y = block['origin']['y']
+    cols, rows = block['cols'], block['rows']
+    gap_x, gap_y = block['gap_x'], block['gap_y']
+    block_size = block.get('block_size', rows)
+    block_gap_y = block.get('block_gap_y', 0)
+    h, w = ring_response.shape
+    ir = int(round(bubble_radius))
+    if ir < 3: return (0, 0)
+
+    bubbles = []
+    for row in range(rows):
+        num_gaps = row // block_size if block_size > 0 else 0
+        base_y = _get_calibrated_y(origin_y + row * gap_y + num_gaps * block_gap_y, y_corrections)
+        for col in range(cols):
+            bubbles.append((int(round(origin_x + col * gap_x)), base_y))
+
+    best_dy, max_fill = 0, -1.0
+    for dy in range(-max_shift_y, max_shift_y + 1):
+        total = 0.0
+        for ix, by in bubbles:
+            iy = int(round(by + dy))
+            if 0 <= iy < h and 0 <= ix < w:
+                total += ring_response[iy, ix]
+        if total > max_fill:
+            max_fill = total
+            best_dy = dy
+
+    best_dx, max_fill = 0, -1.0
+    for dx in range(-max_shift_x, max_shift_x + 1):
+        total = 0.0
+        for ix, by in bubbles:
+            nix = ix + dx
+            iy = int(round(by + best_dy))
+            if 0 <= iy < h and 0 <= nix < w:
+                total += ring_response[iy, nix]
+        if total > max_fill:
+            max_fill = total
+            best_dx = dx
+    return best_dx, best_dy
+
 
 
 def _detect_digits_v2(thresh, block, y_corrections, bubble_radius, debug_name=None):
@@ -633,50 +1065,65 @@ def _detect_digits_v2(thresh, block, y_corrections, bubble_radius, debug_name=No
     fill_ratio = block.get('thresholds', {}).get('fill_ratio', 1.5)
 
     detected = []
+    sampling_radius = max(5.0, bubble_radius * 0.7)
+    col_shifts = []
+    ring_response = _precompute_ring_response(thresh, bubble_radius)
 
     for col in range(cols):
         cx = origin_x + col * gap_x
         row_fills = []
 
+        base_ys = [_get_calibrated_y(origin_y + r * gap_y, y_corrections) for r in range(rows)]
+        best_dx, best_dy = _align_column_xy(ring_response, cx, base_ys, bubble_radius)
+        col_shifts.append((best_dx, best_dy))
+
+        actual_cx = cx + best_dx
+
         for row in range(rows):
-            expected_y = origin_y + row * gap_y
-            actual_y = _get_calibrated_y(expected_y, y_corrections)
-            fill = _sample_bubble_fill(thresh, cx, actual_y, bubble_radius)
+            actual_y = base_ys[row] + best_dy
+            fill = _sample_bubble_fill(thresh, actual_cx, actual_y, sampling_radius)
             row_fills.append(fill)
 
-        # Find the filled bubble using relative comparison
+ # Find the filled bubble using relative comparison
         max_fill = max(row_fills) if row_fills else 0
         median_fill = float(np.median(row_fills)) if row_fills else 0
 
+ # Baseline safeguards against median=0 when sampling pure inner core of empty bubbles
+        baseline = max(median_fill, 2.0)
         best_digit = None
-        if max_fill > 20 and median_fill > 0 and max_fill >= median_fill * fill_ratio:
+        if max_fill > 15 and max_fill >= baseline * fill_ratio:
             best_digit = str(np.argmax(row_fills))
 
         detected.append(best_digit)
 
-        fills_str = ', '.join(f'{f:4d}' for f in row_fills)
-        print(f"[OMR-v2] col{col} digit={best_digit} max={max_fill} "
-              f"median={median_fill:.0f} fills=[{fills_str}]")
+        if OMR_DEBUG:
+            fills_str = ', '.join(f'{f:4d}' for f in row_fills)
+            print(f"[OMR] col{col} digit={best_digit} dx={best_dx:+d} dy={best_dy:+d} fills=[{fills_str}]")
 
-    # Debug visualization
+ # Debug visualization
     if debug_name:
         h, w = thresh.shape
         debug_img = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
         for col in range(cols):
             cx = origin_x + col * gap_x
+            best_dx, best_dy = col_shifts[col]
+            actual_cx = cx + best_dx
             for row in range(rows):
                 expected_y = origin_y + row * gap_y
-                actual_y = _get_calibrated_y(expected_y, y_corrections)
-                color = (0, 200, 0)  # green circle
-                cv2.circle(debug_img, (int(cx), int(actual_y)),
-                           int(bubble_radius), color, 1)
-            # Mark detected digit
+                actual_y = _get_calibrated_y(expected_y, y_corrections) + best_dy
+                
+ # Draw expected outer ring (green)
+                cv2.circle(debug_img, (int(actual_cx), int(actual_y)), int(bubble_radius), (0, 200, 0), 1)
+ # Draw actual sampling region (cyan dotted)
+                cv2.circle(debug_img, (int(actual_cx), int(actual_y)), int(sampling_radius), (255, 255, 0), 1)
+                
+ # Mark detected digit
             if detected[col] is not None:
                 dr = int(detected[col])
                 dy = origin_y + dr * gap_y
-                dy = _get_calibrated_y(dy, y_corrections)
-                cv2.circle(debug_img, (int(cx), int(dy)),
-                           int(bubble_radius), (0, 0, 255), 2)
+                dy = _get_calibrated_y(dy, y_corrections) + best_dy
+                cv2.circle(debug_img, (int(actual_cx), int(dy)), int(sampling_radius), (0, 0, 255), 2)
+                cv2.circle(debug_img, (int(actual_cx), int(dy)), 2, (0, 0, 255), -1)
         _save_debug(debug_name, debug_img)
 
     return detected
@@ -691,70 +1138,114 @@ def _detect_answers_v2(thresh, template, y_corrections, bubble_radius, num_quest
 
     Returns: {question_index: [selected_choice_indices]}
     """
+    h, w = thresh.shape
     answer_blocks = get_all_answer_blocks(template)
-    fill_ratio_default = template.get('global_thresholds', {}).get(
-        'relative_fill_ratio', 1.5)
 
     detected_answers = {}
-    # Collect per-block debug data for visualization
     _debug_block_data = []
+    
+    sampling_radius = max(5.0, bubble_radius * 0.7)
+    sampling_area = math.pi * (sampling_radius ** 2)
+
+ # Precompute ring response ONCE for the entire image
+    ring_response = _precompute_ring_response(thresh, bubble_radius)
 
     for block_name, block in answer_blocks:
         origin_x = block['origin']['x']
         origin_y = block['origin']['y']
-        cols = block['cols']  # num_choices
-        rows = block['rows']  # num questions in this column
+        cols = block['cols']
+        rows = block['rows']
         gap_x = block['gap_x']
         gap_y = block['gap_y']
         block_size = block.get('block_size', rows)
         block_gap_y = block.get('block_gap_y', 0)
-        q_start = block.get('question_start', 1) - 1  # convert to 0-based
+        q_start = block.get('question_start', 1) - 1
+        
         min_fill = block.get('thresholds', {}).get('min_fill_pixels', 80)
-        fill_ratio = block.get('thresholds', {}).get('fill_ratio', fill_ratio_default)
+        dynamic_min_fill = max(15, int(sampling_area * 0.30))
+        if min_fill > dynamic_min_fill:
+            min_fill = dynamic_min_fill
 
-        block_rows_debug = []  # (q_idx, actual_y, choice_fills, selected)
+        fill_ratio = 1.3
+
+ # Block-level alignment using precomputed ring_response
+        best_dx, best_dy = _align_block_xy(ring_response, block, y_corrections, bubble_radius)
+        if OMR_DEBUG:
+            print(f"[OMR] Block {block_name}: dx={best_dx:+d} dy={best_dy:+d}")
+
+        block_rows_debug = []
 
         for row in range(rows):
             q_idx = q_start + row
             if q_idx >= num_questions:
                 break
 
-            # Compute Y with block gap
             num_gaps = row // block_size if block_size > 0 else 0
             expected_y = origin_y + row * gap_y + num_gaps * block_gap_y
-            actual_y = _get_calibrated_y(expected_y, y_corrections)
+            base_y = _get_calibrated_y(expected_y, y_corrections) + best_dy
 
-            # Sample fill at each choice position
+ # Row-level XY-refinement using ring_response (array lookups, no ROI)
+            local_dx, local_dy = 0, 0
+ # Find local_dy
+            max_y_fill = -1.0
+            for d_y in range(-8, 9):
+                rf = 0.0
+                for col in range(cols):
+                    ix = int(round(origin_x + col * gap_x + best_dx))
+                    iy = int(round(base_y + d_y))
+                    if 0 <= iy < h and 0 <= ix < w:
+                        rf += ring_response[iy, ix]
+                if rf > max_y_fill:
+                    max_y_fill = rf
+                    local_dy = d_y
+ # Find local_dx
+            max_x_fill = -1.0
+            for d_x in range(-8, 9):
+                rf = 0.0
+                for col in range(cols):
+                    ix = int(round(origin_x + col * gap_x + best_dx + d_x))
+                    iy = int(round(base_y + local_dy))
+                    if 0 <= iy < h and 0 <= ix < w:
+                        rf += ring_response[iy, ix]
+                if rf > max_x_fill:
+                    max_x_fill = rf
+                    local_dx = d_x
+
+            actual_y = base_y + local_dy
+            row_dx = best_dx + local_dx
+
             choice_fills = []
             for col in range(cols):
                 cx = origin_x + col * gap_x
-                fill = _sample_bubble_fill(thresh, cx, actual_y, bubble_radius)
+                actual_cx = cx + row_dx
+                fill = _sample_bubble_fill(thresh, actual_cx, actual_y, sampling_radius)
                 choice_fills.append(fill)
 
-            # Determine selected answers
             max_fill = max(choice_fills) if choice_fills else 0
             median_fill = float(np.median(choice_fills)) if choice_fills else 0
-
+            baseline = max(median_fill, 2.0)
+            threshold = max(min_fill, max_fill * 0.40)
+            
             selected = []
             for ci, fill in enumerate(choice_fills):
-                if fill >= min_fill and median_fill > 0 and fill >= median_fill * fill_ratio:
+                if fill >= threshold and fill >= baseline * fill_ratio:
                     selected.append(ci)
 
             detected_answers[q_idx] = selected
-            block_rows_debug.append((q_idx, actual_y, choice_fills, selected))
+            block_rows_debug.append((q_idx, row_dx, actual_y, choice_fills, selected))
 
+ # Only print anomalies in production, all in debug
             if len(selected) == 0:
-                print(f"[OMR-v2] Q{q_idx+1}: BLANK fills={choice_fills}")
+                print(f"[OMR] Q{q_idx+1}: BLANK fills={choice_fills}")
             elif len(selected) > 1:
-                print(f"[OMR-v2] Q{q_idx+1}: MULTIPLE={selected} fills={choice_fills}")
-            else:
+                print(f"[OMR] Q{q_idx+1}: MULTIPLE={selected} fills={choice_fills}")
+            elif OMR_DEBUG:
                 label = chr(65 + selected[0])
-                print(f"[OMR-v2] Q{q_idx+1}: {label} fills={choice_fills}")
+                print(f"[OMR] Q{q_idx+1}: {label} fills={choice_fills}")
 
-        _debug_block_data.append((block_name, block, block_rows_debug))
+        _debug_block_data.append((block_name, block, block_rows_debug, best_dx, best_dy))
 
-    # ===== DEBUG: Answer detection overlay =====
-    _save_answers_debug(thresh, _debug_block_data, bubble_radius)
+    _save_answers_debug(thresh, _debug_block_data, sampling_radius)
 
     return detected_answers
 
@@ -768,36 +1259,36 @@ def _save_answers_debug(thresh, block_data, bubble_radius):
     h, w = thresh.shape
     r = int(bubble_radius)
 
-    # --- 1. Full-page overlay ---
+ # --- 1. Full-page overlay ---
     overlay = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
 
-    for block_name, block, rows_debug in block_data:
+    for block_name, block, rows_debug, best_dx, best_dy in block_data:
         origin_x = block['origin']['x']
         gap_x = block['gap_x']
         cols = block['cols']
 
-        for q_idx, actual_y, choice_fills, selected in rows_debug:
+        for q_idx, row_dx, actual_y, choice_fills, selected in rows_debug:
             for col in range(cols):
-                cx = int(origin_x + col * gap_x)
+                cx = int(origin_x + col * gap_x + row_dx)
                 cy = int(actual_y)
 
                 if col in selected:
-                    # Detected answer → filled red circle
+ # Detected answer → filled red circle
                     cv2.circle(overlay, (cx, cy), r, (0, 0, 255), 2)
                     cv2.circle(overlay, (cx, cy), r - 2, (0, 0, 255), cv2.FILLED)
                 else:
-                    # Empty bubble → thin green circle
+ # Empty bubble → thin green circle
                     cv2.circle(overlay, (cx, cy), r, (0, 180, 0), 1)
 
-            # Question label
-            first_cx = int(origin_x)
+ # Question label
+            first_cx = int(origin_x + row_dx)
             cv2.putText(overlay, f"Q{q_idx+1}", (first_cx - 35, int(actual_y) + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 200, 0), 1)
 
     _save_debug("debug_answers_overlay.jpg", overlay)
 
-    # --- 2. Per-column crops with fill annotations ---
-    for col_idx, (block_name, block, rows_debug) in enumerate(block_data):
+ # --- 2. Per-column crops with fill annotations ---
+    for col_idx, (block_name, block, rows_debug, best_dx, best_dy) in enumerate(block_data):
         if not rows_debug:
             continue
 
@@ -805,17 +1296,17 @@ def _save_answers_debug(thresh, block_data, bubble_radius):
         gap_x = block['gap_x']
         cols = block['cols']
 
-        # Compute crop region
-        x1 = max(0, int(origin_x - gap_x - 40))
-        x2 = min(w, int(origin_x + cols * gap_x + gap_x))
-        y1 = max(0, int(rows_debug[0][1] - bubble_radius - 15))
-        y2 = min(h, int(rows_debug[-1][1] + bubble_radius + 15))
+ # Compute crop region
+        x1 = max(0, int(origin_x + best_dx - gap_x - 40))
+        x2 = min(w, int(origin_x + best_dx + cols * gap_x + gap_x))
+        y1 = max(0, int(rows_debug[0][2] - bubble_radius - 15))
+        y2 = min(h, int(rows_debug[-1][2] + bubble_radius + 15))
 
         crop = cv2.cvtColor(thresh[y1:y2, x1:x2], cv2.COLOR_GRAY2BGR)
 
-        for q_idx, actual_y, choice_fills, selected in rows_debug:
+        for q_idx, row_dx, actual_y, choice_fills, selected in rows_debug:
             for col in range(cols):
-                cx = int(origin_x + col * gap_x) - x1
+                cx = int(origin_x + col * gap_x + row_dx) - x1
                 cy = int(actual_y) - y1
                 fill_val = choice_fills[col]
 
@@ -827,11 +1318,11 @@ def _save_answers_debug(thresh, block_data, bubble_radius):
                 else:
                     cv2.circle(crop, (cx, cy), r, (0, 180, 0), 1)
 
-                # Fill value annotation
+ # Fill value annotation
                 cv2.putText(crop, str(fill_val), (cx - 8, cy + r + 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.25, (200, 150, 0), 1)
 
-            # Question number
+ # Question number
             cv2.putText(crop, f"Q{q_idx+1}", (2, int(actual_y) - y1 + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 200, 0), 1)
 
@@ -863,16 +1354,15 @@ def detect_all_from_image(image_path, test):
     try:
         template = load_template_for_test(test.num_questions)
     except TemplateValidationError as exc:
-        raise Exception(f"OMR template is invalid: {exc}") from exc
+        raise Exception("Cannot determine, please capture again.") from exc
 
     bubble_radius = template.get('bubble_radius_px', 9.0)
     num_questions = test.num_questions
 
-    # ===== STEP 1: TIMING MARK Y-CALIBRATION =====
-    print("[OMR-v2] === Timing mark calibration ===")
+    if OMR_DEBUG:
+        print("[OMR] Timing mark calibration")
     y_corrections = _calibrate_timing_marks(thresh, template)
 
-    # ===== DEBUG: Draw grid overlay =====
     debug_overlay = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
     for tm in get_timing_mark_positions(template):
         ex, ey = int(tm['x']), int(tm['y'])
@@ -884,19 +1374,18 @@ def detect_all_from_image(image_path, test):
             cv2.rectangle(debug_overlay, (ex - 2, ey - 2), (ex + 8, ey + 2), (0, 0, 255), 1)
     _save_debug("debug_timing_marks.jpg", debug_overlay)
 
-    # ===== STEP 2: DETECT STUDENT ID (with auto-rotation) =====
-    print("[OMR-v2] === Detecting STUDENT ID ===")
+
     sid_block = get_block(template, 'student_id')
     mssv_digits = _detect_digits_v2(
         thresh, sid_block, y_corrections, bubble_radius,
         debug_name="debug_grid_mssv_v2.jpg"
     )
 
-    # --- AUTO-ROTATION 180° ---
-    # If all digits are None/'?', the sheet might be upside down.
+ # --- AUTO-ROTATION 180° ---
+ # If all digits are None/'?', the sheet might be upside down.
     valid_digit_count = sum(1 for d in mssv_digits if d is not None)
     if valid_digit_count == 0:
-        print("[OMR-v2] ⚠️  Student ID all blank — trying 180° rotation")
+        print("[OMR] Student ID blank — trying 180° rotation")
         paper_r = cv2.rotate(paper, cv2.ROTATE_180)
         warped_r = cv2.rotate(warped, cv2.ROTATE_180)
         thresh_r = cv2.rotate(thresh, cv2.ROTATE_180)
@@ -909,18 +1398,21 @@ def detect_all_from_image(image_path, test):
         valid_r = sum(1 for d in mssv_digits_r if d is not None)
 
         if valid_r > valid_digit_count:
-            print(f"[OMR-v2] ✅ 180° rotation improved: {valid_digit_count}→{valid_r} valid digits. Using rotated image.")
+            print(f"[OMR] 180° rotation improved: {valid_digit_count}→{valid_r} valid digits")
             paper, warped, thresh = paper_r, warped_r, thresh_r
             y_corrections = y_corrections_r
             mssv_digits = mssv_digits_r
         else:
-            print("[OMR-v2] 180° rotation did not help. Keeping original orientation.")
+            if OMR_DEBUG:
+                print("[OMR] 180° rotation did not help")
 
     mssv = ''.join(d if d is not None else '?' for d in mssv_digits)
-    print(f"[OMR-v2] Detected MSSV: {mssv}")
+    print(f"[OMR] MSSV: {mssv}")
+    
+    if '?' in mssv:
+        raise Exception("Cannot determine Student ID, please capture again.")
 
-    # ===== STEP 3: DETECT TEST ID (3 digits) =====
-    print("[OMR-v2] === Detecting TEST ID ===")
+
     tid_block = get_block(template, 'test_id')
     variant_digits = _detect_digits_v2(
         thresh, tid_block, y_corrections, bubble_radius,
@@ -928,14 +1420,10 @@ def detect_all_from_image(image_path, test):
     )
     for i, d in enumerate(variant_digits):
         if d is None:
-            raise Exception(
-                f"Cannot read digit {i + 1} of the Test ID. "
-                f"Please check if the bubbles are filled correctly."
-            )
+            raise Exception("Cannot determine Test ID, please capture again.")
     variant_code = ''.join(variant_digits)
-    print(f"[OMR-v2] Detected variant code: {variant_code}")
+    print(f"[OMR] Variant: {variant_code}")
 
-    # ===== DEBUG: Draw detected digits on paper =====
     debug_regions = paper.copy()
     _draw_block_debug(debug_regions, sid_block, y_corrections,
                       bubble_radius, mssv_digits, (255, 100, 0), "MSSV")
@@ -943,8 +1431,8 @@ def detect_all_from_image(image_path, test):
                       bubble_radius, variant_digits, (0, 0, 255), "TEST_ID")
     _save_debug("debug_header_regions_v2.jpg", debug_regions)
 
-    # ===== STEP 4: DETECT ANSWERS =====
-    print("[OMR-v2] === Detecting answers ===")
+    if OMR_DEBUG:
+        print("[OMR] Detecting answers")
     detected_answers = _detect_answers_v2(
         thresh, template, y_corrections, bubble_radius, num_questions
     )
@@ -969,14 +1457,14 @@ def _draw_block_debug(image, block, y_corrections, bubble_radius,
             ay = int(_get_calibrated_y(ey, y_corrections))
             cv2.circle(image, (cx, ay), int(bubble_radius), color, 1)
 
-        # Highlight detected digit
+ # Highlight detected digit
         if col < len(detected_values) and detected_values[col] is not None:
             dr = int(detected_values[col])
             ey = origin_y + dr * gap_y
             ay = int(_get_calibrated_y(ey, y_corrections))
             cv2.circle(image, (cx, ay), int(bubble_radius) + 2, (0, 255, 0), 2)
 
-    # Label
+ # Label
     lx = int(origin_x)
     ly = int(origin_y - 15)
     result = ''.join(d if d else '?' for d in detected_values)
@@ -998,14 +1486,14 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
 
     img = np.ones((table_h, table_w, 3), dtype=np.uint8) * 255
 
-    # Title
+ # Title
     cv2.putText(img, f"MSSV: {mssv}  Variant: {variant_code}", (10, 18),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
     score_10 = round((correct_count / total_questions) * 10, 1) if total_questions > 0 else 0
     cv2.putText(img, f"Score: {correct_count}/{total_questions} ({score_10}/10)", (10, 38),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 150), 1)
 
-    # Header row
+ # Header row
     y = header_h
     headers = ["Q#", "Detected", "Correct", "Result"]
     x = 0
@@ -1015,7 +1503,7 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
         x += col_widths[i]
     cv2.line(img, (0, y + row_h), (table_w, y + row_h), (100, 100, 100), 1)
 
-    # Data rows
+ # Data rows
     for q_idx in range(num_questions):
         y = header_h + row_h * (q_idx + 1)
         user_indices = detected_answers.get(q_idx, [])
@@ -1028,7 +1516,7 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
         result_str = "OK" if is_correct else "WRONG"
         result_color = (0, 140, 0) if is_correct else (0, 0, 200)
 
-        # Alternate row background
+ # Alternate row background
         if q_idx % 2 == 0:
             cv2.rectangle(img, (0, y), (table_w, y + row_h), (245, 245, 245), cv2.FILLED)
 
@@ -1039,10 +1527,10 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
             cv2.putText(img, txt, (x + 3, y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.35, clr, 1)
             x += col_widths[i]
 
-        # Row separator
+ # Row separator
         cv2.line(img, (0, y + row_h), (table_w, y + row_h), (220, 220, 220), 1)
 
-    # Column separators
+ # Column separators
     x = 0
     for cw in col_widths:
         x += cw
@@ -1051,9 +1539,7 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
     _save_debug("debug_grading_comparison.jpg", img)
 
 
-# ==============================================================================
 # GRADED IMAGE OVERLAY
-# ==============================================================================
 
 def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
                         detected_answers, answer_key, num_questions,
@@ -1077,6 +1563,11 @@ def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
     GREEN = (0, 200, 0)
     RED = (0, 0, 200)
     ALPHA = 0.3  # 30% overlay opacity
+
+    # Single overlay layer for ALL transparent fills (1 copy instead of N copies)
+    overlay = result.copy()
+    # Track positions for border drawing after blend
+    border_draws = []  # list of (cx, cy, r, color)
 
     for block_name, block in answer_blocks:
         origin_x = block['origin']['x']
@@ -1103,6 +1594,13 @@ def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
 
             r = int(bubble_radius)
 
+            if len(user_selected) == 0:
+ # Draw a yellow line (like a timing mark) to the left of the row
+                cx_first = int(origin_x)
+                cv2.line(result, (cx_first - 25, int(actual_y)), (cx_first - 5, int(actual_y)), (0, 255, 255), 3)
+                cv2.line(overlay, (cx_first - 25, int(actual_y)), (cx_first - 5, int(actual_y)), (0, 255, 255), 3)
+                continue
+
             for col in range(cols):
                 cx = int(origin_x + col * gap_x)
                 cy = int(actual_y)
@@ -1111,29 +1609,32 @@ def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
                 is_correct_choice = col in correct_set
 
                 if is_selected and is_correct_choice:
-                    # Student picked this AND it's correct → GREEN FILL (transparent)
-                    overlay = result.copy()
+ # Student picked this AND it's correct → GREEN FILL on overlay
                     cv2.circle(overlay, (cx, cy), r, GREEN, cv2.FILLED)
-                    cv2.addWeighted(overlay, ALPHA, result, 1 - ALPHA, 0, result)
-                    cv2.circle(result, (cx, cy), r, GREEN, 2)
+                    border_draws.append((cx, cy, r, GREEN))
 
                 elif is_selected and not is_correct_choice:
-                    # Student picked this BUT it's wrong → RED FILL (transparent)
-                    overlay = result.copy()
+ # Student picked this BUT it's wrong → RED FILL on overlay
                     cv2.circle(overlay, (cx, cy), r, RED, cv2.FILLED)
-                    cv2.addWeighted(overlay, ALPHA, result, 1 - ALPHA, 0, result)
-                    cv2.circle(result, (cx, cy), r, RED, 2)
+                    border_draws.append((cx, cy, r, RED))
 
                 elif not is_selected and is_correct_choice:
-                    # Correct answer the student missed → GREEN HOLLOW RING
-                    cv2.circle(result, (cx, cy), r + 2, GREEN, 2)
+ # Correct answer the student missed → GREEN HOLLOW RING (no fill needed)
+                    border_draws.append((cx, cy, r + 2, GREEN))
 
-    # Draw score text at top-right
+    # Single blend operation for ALL transparent fills
+    cv2.addWeighted(overlay, ALPHA, result, 1 - ALPHA, 0, result)
+
+    # Draw borders AFTER blend so they are crisp (not transparent)
+    for cx, cy, r, color in border_draws:
+        cv2.circle(result, (cx, cy), r, color, 2)
+
+ # Draw score text at top-right
     score_text = f"Score: {correct_count}/{total_questions}"
     scale_10 = round((correct_count / total_questions) * 10, 1) if total_questions > 0 else 0
     full_text = f"{score_text} ({scale_10}/10)"
 
-    # White background bar for readability
+ # White background bar for readability
     (tw, th), _ = cv2.getTextSize(full_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     tx = result.shape[1] - tw - 15
     ty = 30
@@ -1146,182 +1647,154 @@ def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
     return result
 
 
-# ==============================================================================
 # SUBMISSION PROCESSING PIPELINE
-# ==============================================================================
 
-def process_submission_cloudinary(submission_id, image_url):
+def process_submission_local(submission_id, local_image_path):
     """
-    Process submission with variant detection + MSSV detection + grading.
+    Process submission from a LOCAL file path (zero Cloudinary downloads).
 
-    Flow:
-    1. Download image from Cloudinary
-    2. Detect MSSV (8 digits), variant code (3 digits), answers in one pass
-    3. Get variant from DB
-    4. Get answer key for that variant
-    5. Grade and save (including MSSV)
-    6. Draw graded overlay and re-upload to Cloudinary (overwrites submission_image)
+    Returns: (submission, graded_base64)
+        - submission: updated PaperSubmission object
+        - graded_base64: base64-encoded JPEG of the graded overlay
+          (for instant frontend display without waiting for Cloudinary)
+
+    Cloudinary upload of the graded image happens in a background thread
+    so it doesn't block the HTTP response.
     """
+    pipeline_start = time.perf_counter()
     try:
         submission = PaperSubmission.objects.get(id=submission_id)
         test = submission.test
 
         print(f"[OMR] Processing submission {submission_id} for test '{test.title}'")
 
-        # Download image from Cloudinary
-        response = requests.get(image_url)
-        response.raise_for_status()
-
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-            tmp_file.write(response.content)
-            tmp_image_path = tmp_file.name
-
-        print(f"[OMR] Downloaded image to: {tmp_image_path}")
-
-        # ===== DEBUG: Save original input image =====
-        original_input = cv2.imread(tmp_image_path)
+        original_input = cv2.imread(local_image_path)
         if original_input is not None:
             _save_debug("debug_original_input.jpg", original_input)
 
-        # ===== STEP 1: DETECT ALL (MSSV + Variant + Answers) =====
+        t0 = time.perf_counter()
         mssv, variant_code, detected_answers, paper, template, y_corrections, bubble_radius = \
-            detect_all_from_image(tmp_image_path, test)
-        print(f"[OMR] Detected MSSV: {mssv}, Variant: {variant_code}")
-        print(f"[OMR] Detected answers: {detected_answers}")
+            detect_all_from_image(local_image_path, test)
+        detect_ms = (time.perf_counter() - t0) * 1000
+        print(f"[OMR] Detection: {detect_ms:.0f}ms | MSSV={mssv} Variant={variant_code}")
 
-        # ===== STEP 2: SAVE MSSV =====
         submission.detected_mssv = mssv
 
-        # ===== STEP 3: GET VARIANT FROM DB =====
         try:
             variant = PaperTestVariant.objects.get(test=test, variant_code=variant_code)
             submission.variant = variant
             submission.save()
-            print(f"[OMR] Found variant in database: {variant.id}")
         except PaperTestVariant.DoesNotExist:
-            available = list(test.variants.values_list('variant_code', flat=True))
-            raise Exception(
-                f"Test ID '{variant_code}' not found. "
-                f"Available IDs: {available}. "
-                f"Please check the image or filled bubbles."
-            )
+            raise Exception("Cannot determine Test ID, please capture again.")
 
-        # ===== STEP 4: GET ANSWER KEY FOR THIS VARIANT =====
         answer_key = variant.get_answer_key()
-        print(f"[OMR] Answer key for variant {variant_code}: {answer_key}")
 
-        # ===== STEP 5: GRADE =====
         correct_count = 0
         total_questions = test.num_questions
-
         paper_questions = {pq.question.id: pq for pq in test.paper_questions.all()}
 
         with transaction.atomic():
-            # Delete old answers if reprocessing
             PaperAnswerDetected.objects.filter(submission=submission).delete()
             PaperUserAnswer.objects.filter(submission=submission).delete()
+
+            # Bulk create instead of one-by-one INSERT (2 queries instead of 2*N)
+            answers_to_create = []
+            user_answers_to_create = []
 
             for question_index, user_answer_indices in detected_answers.items():
                 if question_index >= len(variant.question_order):
                     continue
-
-                # Map question_index to actual question_id in this variant
                 question_id = variant.question_order[question_index]
                 paper_question = paper_questions.get(question_id)
-
                 if not paper_question:
                     continue
 
-                # Get correct answer for this question in this variant
                 correct_indices_set = set(answer_key.get(question_index, []))
                 user_indices_set = set(user_answer_indices)
-
-                # ALL-OR-NOTHING grading
                 is_correct = (correct_indices_set == user_indices_set) and len(user_indices_set) > 0
-
                 if is_correct:
                     correct_count += 1
 
-                print(f"[OMR] Q{question_index+1}: User={user_indices_set}, Correct={correct_indices_set}, Result={'CORRECT' if is_correct else 'WRONG'}")
-
-                # Save detected answer
-                PaperAnswerDetected.objects.create(
+                answers_to_create.append(PaperAnswerDetected(
                     submission=submission,
                     question=paper_question,
                     is_correct=is_correct,
                     score=1.0 if is_correct else 0.0
-                )
-
-                # Save user answer (JSONField)
-                PaperUserAnswer.objects.create(
+                ))
+                user_answers_to_create.append(PaperUserAnswer(
                     submission=submission,
                     question=paper_question,
                     selected_options=list(user_indices_set)
-                )
+                ))
 
-            # FINAL SCORE
+            PaperAnswerDetected.objects.bulk_create(answers_to_create)
+            PaperUserAnswer.objects.bulk_create(user_answers_to_create)
+
             final_score = (correct_count / total_questions) * 10 if total_questions > 0 else 0
             submission.total_score = round(final_score, 2)
             submission.save()
 
-        print(f"[OMR] Graded: {final_score}/10 ({correct_count}/{total_questions} correct) - Variant {variant_code} - MSSV {mssv}")
+        print(f"[OMR] Graded: {final_score}/10 ({correct_count}/{total_questions}) - Variant {variant_code} - MSSV {mssv}")
 
-        # ===== DEBUG: Grading comparison table =====
         _save_grading_comparison(
             detected_answers, answer_key, test.num_questions,
             correct_count, total_questions, variant_code, mssv
         )
 
-        # ===== STEP 6: DRAW GRADED OVERLAY & RE-UPLOAD =====
-        print("[OMR] === Drawing graded overlay ===")
         graded_image = draw_graded_overlay(
             paper, template, y_corrections, bubble_radius,
             detected_answers, answer_key, test.num_questions,
             correct_count, total_questions
         )
-
-        # Save graded image to temp file
-        graded_tmp_path = tmp_image_path.replace('.jpg', '_graded.jpg')
-        cv2.imwrite(graded_tmp_path, graded_image)
         _save_debug("debug_graded_result.jpg", graded_image)
 
-        # Re-upload graded image to Cloudinary
-        try:
-            upload_result = cloudinary.uploader.upload(
-                graded_tmp_path,
-                folder='testgen/graded',
-                resource_type='image',
-            )
-            submission.submission_image = upload_result['secure_url']
-            submission.save()
-            print(f"[OMR] Graded image uploaded: {upload_result['secure_url']}")
-        except Exception as upload_err:
-            print(f"[OMR] WARNING: Failed to upload graded image: {upload_err}")
+ # Encode graded image as Base64 for instant frontend display
+        _, buffer = cv2.imencode('.jpg', graded_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        graded_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        # Clean up temp files
-        for f in [tmp_image_path, graded_tmp_path]:
+        def _upload_graded_to_cloudinary(sub_id, img_data):
+            """Upload graded image in background thread (doesn't block response)."""
             try:
-                os.unlink(f)
-            except:
-                pass
+                import django
+                django.setup()
+                from exam.models import PaperSubmission as PS
+ # Write to temp file for cloudinary upload
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as f:
+                    f.write(img_data)
+                    tmp_path = f.name
+                try:
+                    result = cloudinary.uploader.upload(
+                        tmp_path,
+                        folder='testgen/graded',
+                        resource_type='image',
+                    )
+                    sub = PS.objects.get(id=sub_id)
+                    sub.submission_image = result['secure_url']
+                    sub.save()
+                    print(f"[OMR] Background: Graded image uploaded → {result['secure_url']}")
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except:
+                        pass
+            except Exception as e:
+                print(f"[OMR] Background upload failed: {e}")
 
-        return submission
+        import threading
+        thread = threading.Thread(
+            target=_upload_graded_to_cloudinary,
+            args=(submission.id, buffer.tobytes()),
+            daemon=True
+        )
+        thread.start()
+
+        total_ms = (time.perf_counter() - pipeline_start) * 1000
+        print(f"[OMR] ⏱️  TOTAL PIPELINE: {total_ms:.0f}ms (detection={detect_ms:.0f}ms)")
+
+        return submission, graded_base64
 
     except Exception as e:
         print(f"Error processing submission {submission_id}: {str(e)}")
         import traceback
         traceback.print_exc()
-
-        # Clean up temp file if it exists
-        try:
-            if 'tmp_image_path' in locals():
-                os.unlink(tmp_image_path)
-            graded_path = locals().get('graded_tmp_path')
-            if graded_path:
-                os.unlink(graded_path)
-        except:
-            pass
-
-        # Re-raise — the view will handle cleanup (delete submission)
         raise

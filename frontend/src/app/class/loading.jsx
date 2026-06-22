@@ -2,7 +2,7 @@ import { TableSkeleton } from "@/components/ui/skeletons";
 
 export default function ClassLoading() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-blue-200">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
       {/* Header skeleton */}
       <div className="w-full bg-[#dfdfdf] py-6 shadow-md">
         <div className="container max-w-[1152px] mx-auto flex justify-between items-center">
@@ -28,16 +28,23 @@ export default function ClassLoading() {
       </div>
 
       {/* Content skeleton */}
-      <div className="flex items-center justify-center p-4">
-        <div className="w-full max-w-5xl shadow-xl border-0 rounded-xl overflow-hidden bg-white">
-          {/* Card Header skeleton - blue gradient */}
-          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-t-lg px-8 py-5 flex justify-between items-center">
-            <div className="h-7 w-40 bg-white/20 rounded animate-pulse" />
+      <div className="flex items-start justify-center p-6 pt-10">
+        <div className="w-full max-w-7xl shadow-2xl border-0 rounded-xl overflow-hidden bg-white">
+          {/* Card Header skeleton */}
+          <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-t-xl px-8 py-5 flex justify-between items-center">
+            <div>
+              <div className="h-7 w-40 bg-white/20 rounded animate-pulse" />
+              <div className="h-4 w-60 bg-white/10 rounded animate-pulse mt-2" />
+            </div>
             <div className="h-10 w-36 bg-white/20 rounded-lg animate-pulse" />
           </div>
+          {/* Search skeleton */}
+          <div className="p-4 border-b border-gray-100 bg-white">
+            <div className="h-10 w-80 bg-gray-100 rounded-lg animate-pulse" />
+          </div>
           {/* Table skeleton */}
-          <div className="p-6">
-            <TableSkeleton rows={5} cols={4} />
+          <div className="p-0">
+            <TableSkeleton rows={8} cols={5} />
           </div>
         </div>
       </div>

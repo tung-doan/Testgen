@@ -3,13 +3,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Count, Avg
-from .models import Exam, ExamAttempt, ExamQuestion
+from django.db.models import Count, Avg, Q
+from .models import Exam, ExamAttempt, ExamQuestion, OnlineAnswer
 from .serializers import (
     ExamSerializer, ExamCreateUpdateSerializer, ExamDetailForAttemptSerializer,
     ExamAttemptSerializer, ExamAttemptCreateSerializer, 
     ExamAttemptSubmitSerializer, ExamAttemptResultSerializer,
-    ExamQuestionDetailSerializer, ExamAttemptListSerializer
+    ExamQuestionDetailSerializer, ExamAttemptListSerializer,
+    ExamAttemptInProgressSerializer
 )
 from classrooms.models import Student
 from django.db import transaction
@@ -127,6 +128,7 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
             'exam', 'student', 'student__user'
         ).prefetch_related(
             'student__classrooms',
+            'exam__examquestion_set__question__options',
             'answers__question__options'
         )
         
@@ -154,10 +156,28 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
             return ExamAttemptCreateSerializer
         elif self.action == 'submit_exam':
             return ExamAttemptSubmitSerializer
-        elif self.action == 'retrieve':
-            return ExamAttemptSerializer
         return ExamAttemptResultSerializer
-    
+
+    def retrieve(self, request, *args, **kwargs):
+        """Get attempt detail - auto-expire if time is up, return correct serializer"""
+        attempt = self.get_object()
+        
+        # Auto-expire check: if attempt is IN_PROGRESS but time has run out
+        if attempt.status == 'IN_PROGRESS' and attempt.is_expired:
+            attempt.auto_complete()
+            # Return completed result
+            serializer = ExamAttemptResultSerializer(attempt, context={'request': request})
+            return Response(serializer.data)
+        
+        # For IN_PROGRESS attempts, return full question data so student can take/resume exam
+        if attempt.status == 'IN_PROGRESS':
+            serializer = ExamAttemptInProgressSerializer(attempt, context={'request': request})
+            return Response(serializer.data)
+        
+        # For COMPLETED attempts, return result view
+        serializer = ExamAttemptResultSerializer(attempt, context={'request': request})
+        return Response(serializer.data)
+
     @action(detail=False, methods=['get'], url_path='pending-exams')
     def pending_exams(self, request):
         """Get list of pending exams for student"""
@@ -177,20 +197,37 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Get all exams for the classroom
+        # Get all exams for the classroom, annotated with attempt counts
         available_exams = Exam.objects.filter(
-            classroom__in=student.classrooms.all()
-        ).prefetch_related('examquestion_set').distinct()
+            classroom__in=student.classrooms.all(),
+            is_published=True,
+        ).prefetch_related('examquestion_set').annotate(
+            completed_count=Count('attempts', filter=Q(
+                attempts__student=student, attempts__status='COMPLETED'
+            ))
+        ).distinct()
+        
+        # Batch fetch all in-progress attempts for this student (1 query)
+        in_progress_map = {}
+        in_progress_attempts = ExamAttempt.objects.filter(
+            exam__in=available_exams,
+            student=student,
+            status='IN_PROGRESS'
+        )
+        for attempt in in_progress_attempts:
+            if attempt.is_expired:
+                attempt.auto_complete()
+            else:
+                in_progress_map[attempt.exam_id] = attempt
         
         # Filter pending exams
         pending_exams = []
         for exam in available_exams:
-            attempts_made = ExamAttempt.objects.filter(
-                exam=exam,
-                student=student
-            ).count()
+            in_progress_attempt = in_progress_map.get(exam.id)
+            completed_count = exam.completed_count
             
-            if attempts_made < exam.max_attempts:
+            # Show exam if: has in-progress attempt OR still has remaining attempts
+            if in_progress_attempt or completed_count < exam.max_attempts:
                 pending_exams.append({
                     'id': exam.id,
                     'title': exam.title,
@@ -201,13 +238,14 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
                     'total_points': sum(eq.points for eq in exam.examquestion_set.all()),
                     'created_at': exam.created_at.isoformat(),
                     'show_results_immediately': exam.show_results_immediately,
-                    'attempts_made': attempts_made
+                    'attempts_made': completed_count,
+                    'in_progress_attempt_id': in_progress_attempt.id if in_progress_attempt else None
                 })
         return Response(pending_exams)
     
     @action(detail=False, methods=['post'], url_path='start-exam')
     def start_exam(self, request):
-        """Start taking an exam"""
+        """Start taking an exam - returns existing IN_PROGRESS attempt if one exists"""
         exam_id = request.data.get('exam_id')
         student_id = request.data.get('student_id')
         
@@ -219,6 +257,12 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
         
         exam = get_object_or_404(Exam, id=exam_id)
         student = get_object_or_404(Student, id=student_id)
+
+        if not exam.is_published:
+            return Response(
+                {"error": "This exam is not published yet"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         if exam.classroom and exam.classroom not in student.classrooms.all():
             return Response(
@@ -226,13 +270,35 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Check number of attempts
-        attempts_count = ExamAttempt.objects.filter(
+        # Check for existing IN_PROGRESS attempt (session persistence)
+        existing_attempt = ExamAttempt.objects.filter(
             exam=exam,
-            student=student
+            student=student,
+            status='IN_PROGRESS'
+        ).first()
+        
+        if existing_attempt:
+            # Check if it's expired
+            if existing_attempt.is_expired:
+                existing_attempt.auto_complete()
+                # Fall through to create a new attempt if allowed
+            else:
+                # Return the existing in-progress attempt
+                response_serializer = ExamAttemptSerializer(existing_attempt)
+                return Response({
+                    'attempt_id': existing_attempt.id,
+                    'resumed': True,
+                    **response_serializer.data
+                }, status=status.HTTP_200_OK)
+        
+        # Check number of COMPLETED attempts
+        completed_count = ExamAttempt.objects.filter(
+            exam=exam,
+            student=student,
+            status='COMPLETED'
         ).count()
         
-        if attempts_count >= exam.max_attempts:
+        if completed_count >= exam.max_attempts:
             return Response(
                 {"error": "Maximum attempts reached"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -249,10 +315,50 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
             response_serializer = ExamAttemptSerializer(attempt)
             return Response({
                 'attempt_id': attempt.id,
+                'resumed': False,
                 **response_serializer.data
             }, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'], url_path='save-answers')
+    def save_answers(self, request, pk=None):
+        """Save answers periodically without submitting the exam"""
+        attempt = self.get_object()
+        
+        if attempt.status == 'COMPLETED':
+            # Return success message instead of error to avoid console errors on race conditions
+            return Response({"message": "Answers already saved from a completed attempt"}, status=status.HTTP_200_OK)
+
+        
+        if attempt.is_expired:
+            attempt.auto_complete()
+            return Response(
+                {"error": "Time is up. Exam has been auto-submitted.", "status": "COMPLETED"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        answers_data = request.data.get('answers', [])
+        
+        # Batch fetch all referenced questions (1 query instead of N)
+        from question_bank.models import Question
+        question_ids = [a.get('question') for a in answers_data if a.get('question')]
+        questions = {q.id: q for q in Question.objects.filter(id__in=question_ids)}
+        
+        for answer_item in answers_data:
+            question_id = answer_item.get('question')
+            answer_data = answer_item.get('answer_data')
+            
+            if question_id and answer_data:
+                question = questions.get(question_id)
+                if question:
+                    OnlineAnswer.objects.update_or_create(
+                        attempt=attempt,
+                        question=question,
+                        defaults={'answer_data': answer_data}
+                    )
+        
+        return Response({"message": "Answers saved successfully"})
     
     @action(detail=True, methods=['post'], url_path='submit-exam')
     def submit_exam(self, request, pk=None):
@@ -260,10 +366,10 @@ class ExamAttemptViewSet(viewsets.ModelViewSet):
         attempt = self.get_object()
         
         if attempt.status == 'COMPLETED':
-            return Response(
-                {"error": "This exam has already been submitted"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            # If already completed, return current results instead of error
+            result_serializer = ExamAttemptResultSerializer(attempt)
+            return Response(result_serializer.data, status=status.HTTP_200_OK)
+
         
         serializer = ExamAttemptSubmitSerializer(data=request.data)
         

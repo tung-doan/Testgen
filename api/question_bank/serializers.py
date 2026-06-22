@@ -1,22 +1,42 @@
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
 from .models import Subject, Chapter, Section, Question, AnswerOption
 
 class SubjectSerializer(serializers.ModelSerializer):
-    chapter_count = serializers.IntegerField(source='chapters.count', read_only=True)
+    chapter_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Subject
         fields = ['id', 'name', 'created_at', 'updated_at', 'chapter_count']
         read_only_fields = ['created_at', 'updated_at']
+        
+    def get_chapter_count(self, obj):
+        count = getattr(obj, 'chapter_count', None)
+        if count is not None:
+            return count
+        return obj.chapters.count()
 
 class ChapterSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True)
-    section_count = serializers.IntegerField(source='sections.count', read_only=True)
+    section_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Chapter
         fields = ['id', 'name', 'subject', 'subject_name', 'order', 'created_at', 'updated_at', 'section_count']
         read_only_fields = ['created_at', 'updated_at']
+        validators = [
+            UniqueTogetherValidator(
+                queryset=Chapter.objects.all(),
+                fields=['subject', 'order'],
+                message="This order number is already used in this subject. Please choose a different order."
+            )
+        ]
+    
+    def get_section_count(self, obj):
+        count = getattr(obj, 'section_count', None)
+        if count is not None:
+            return count
+        return obj.sections.count()
     
     def validate_subject(self, value):
         request = self.context.get('request')
@@ -32,12 +52,25 @@ class ChapterSerializer(serializers.ModelSerializer):
 class SectionSerializer(serializers.ModelSerializer):
     chapter_name = serializers.CharField(source='chapter.name', read_only=True)
     subject_name = serializers.CharField(source='chapter.subject.name', read_only=True)
-    question_count = serializers.IntegerField(source='questions.count', read_only=True)
+    question_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Section
         fields = ['id', 'name', 'chapter', 'chapter_name', 'subject_name', 'order', 'created_at', 'updated_at', 'question_count']
         read_only_fields = ['created_at', 'updated_at']
+        validators = [
+            UniqueTogetherValidator(
+                queryset=Section.objects.all(),
+                fields=['chapter', 'order'],
+                message="This order number is already used in this chapter. Please choose a different order."
+            )
+        ]
+    
+    def get_question_count(self, obj):
+        count = getattr(obj, 'question_count', None)
+        if count is not None:
+            return count
+        return obj.questions.filter(is_active=True).count()
     
     def validate_chapter(self, value):
         request = self.context.get('request')
@@ -67,7 +100,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = [
-            'id', 'prompt', 'question_type', 'question_type_display',
+            'id', 'prompt', 'image', 'question_type', 'question_type_display',
             'section', 'section_name', 'chapter_name', 'subject_name',
             'option_count', 'created_at', 'is_active'
         ]
@@ -82,7 +115,7 @@ class QuestionDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = [
-            'id', 'prompt', 'question_type', 'question_type_display',
+            'id', 'prompt', 'image', 'question_type', 'question_type_display',
             'correct_answer_text',
             'section', 'section_name', 'chapter_name', 'subject_name',
             'created_by', 'created_at', 'updated_at', 'is_active',
@@ -102,7 +135,7 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = [
-            'section', 'question_type', 'prompt', 
+            'section', 'question_type', 'prompt', 'image',
             'correct_answer_text', 'options'
         ]
     

@@ -4,7 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Avg, Q
+from django.db.models import Count, Avg, Q, Subquery, OuterRef, FloatField
+from django.db.models.functions import Coalesce
 from django.http import FileResponse
 from io import BytesIO
 import zipfile
@@ -18,11 +19,10 @@ from exam.models import (
 )
 from exam.serializers import TestSerializer, TestCreateSerializer, SubmissionSerializer, PaperTestVariantSerializer
 from classrooms.models import Student
-from .omr_processing import process_submission_cloudinary
+from .omr_processing import process_submission_local
 from .generate_omr_sheet import generate_omr_sheet
 
 
-# ✅ ==================== SINGLE PDF GEN FUNCTION ====================
 def generate_omr_pdf(title, variant_code, num_questions, num_choices, questions=None):
     """
     OMR Answer Sheet PDF Generator v2.1
@@ -41,7 +41,7 @@ def generate_omr_pdf(title, variant_code, num_questions, num_choices, questions=
 
 
 class TestViewSet(viewsets.ModelViewSet):
-    """✅ CRUD Paper Test + Download Variants + Preview PDF"""
+    """ CRUD Paper Test + Download Variants + Preview PDF"""
     serializer_class = TestSerializer
     permission_classes = [IsAuthenticated]
 
@@ -68,7 +68,7 @@ class TestViewSet(viewsets.ModelViewSet):
         if not variants.exists():
             return Response({"error": "No variants found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Pre-load all questions for this test
+ # Pre-load all questions for this test
         from question_bank.models import Question
         test_question_ids = list(test.paper_questions.values_list('question_id', flat=True))
         all_questions = {q.id: q for q in Question.objects.filter(id__in=test_question_ids).prefetch_related('options')}
@@ -76,7 +76,7 @@ class TestViewSet(viewsets.ModelViewSet):
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for variant in variants:
-                # Build questions_data in variant order with shuffled options
+ # Build questions_data in variant order with shuffled options
                 questions_data = self._build_variant_questions(variant, all_questions)
 
                 pdf_buffer = generate_omr_pdf(
@@ -104,7 +104,7 @@ class TestViewSet(viewsets.ModelViewSet):
         except PaperTestVariant.DoesNotExist:
             return Response({"error": f"Variant {variant_code} not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Build questions_data in variant order with shuffled options
+ # Build questions_data in variant order with shuffled options
         from question_bank.models import Question
         test_question_ids = list(test.paper_questions.values_list('question_id', flat=True))
         all_questions = {q.id: q for q in Question.objects.filter(id__in=test_question_ids).prefetch_related('options')}
@@ -129,11 +129,11 @@ class TestViewSet(viewsets.ModelViewSet):
             q = all_questions.get(q_id)
             if not q:
                 continue
-            # Get original options sorted by order
+ # Get original options sorted by order
             original_options = list(q.options.all().order_by('order'))
-            # Get shuffle map for this question
+ # Get shuffle map for this question
             shuffle_map = variant.answer_shuffles.get(str(q_id), list(range(len(original_options))))
-            # Reorder options according to shuffle
+ # Reorder options according to shuffle
             shuffled_options = []
             for new_idx in shuffle_map:
                 if new_idx < len(original_options):
@@ -165,14 +165,14 @@ class TestViewSet(viewsets.ModelViewSet):
 
             variant_code = ''.join([str(random.randint(0, 9)) for _ in range(3)])
 
-            # Fetch question content from database
+ # Fetch question content from database
             questions_data = []
             if question_ids:
                 db_questions = Question.objects.filter(
                     id__in=question_ids
                 ).prefetch_related('options').order_by('id')
 
-                # Preserve order from question_ids
+ # Preserve order from question_ids
                 q_map = {str(q.id): q for q in db_questions}
                 for qid in question_ids:
                     q = q_map.get(str(qid))
@@ -239,7 +239,6 @@ class TestViewSet(viewsets.ModelViewSet):
         return Response({"answer_keys": answer_keys}, status=status.HTTP_200_OK)
 
 
-# ==================== STATISTICS ====================
 class StatisticViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -262,11 +261,17 @@ class StatisticViewSet(viewsets.ViewSet):
                                  'average_correct_rate': 0, 'question_stats': [],
                                  'message': 'No submissions found'}, status=status.HTTP_200_OK)
             average_score = submissions.aggregate(avg_score=Avg('total_score'))['avg_score'] or 0
+
+            # Single annotated query replaces N+1 loop (was 2 queries per question)
+            pqs = PaperTestQuestion.objects.filter(test=test).order_by('order').annotate(
+                total_answers=Count('paperanswerdetected'),
+                correct_answers=Count('paperanswerdetected', filter=Q(paperanswerdetected__is_correct=True))
+            ).select_related('question')
+
             question_stats = []
-            for pq in PaperTestQuestion.objects.filter(test=test).order_by('order'):
-                answers = PaperAnswerDetected.objects.filter(submission__test=test, question=pq)
-                total = answers.count()
-                correct = answers.filter(is_correct=True).count()
+            for pq in pqs:
+                total = pq.total_answers
+                correct = pq.correct_answers
                 question_stats.append({
                     'question_order': pq.order,
                     'question_prompt': pq.question.prompt if pq.question else "N/A",
@@ -292,33 +297,40 @@ class StatisticViewSet(viewsets.ViewSet):
         """
         from online_exams.models import Exam, ExamAttempt
         from classrooms.models import Classroom
+        from django.db.models import Subquery, OuterRef, FloatField, Q, Count, Avg
 
         user = request.user
 
-        # ── 1. CLASS AVERAGES ──
-        classrooms = Classroom.objects.filter(teacher=user)
-        class_averages = []
-        for classroom in classrooms:
-            # Paper average
-            paper_avg = PaperSubmission.objects.filter(
-                test__classroom=classroom,
+        # ── 1. CLASS AVERAGES (single annotated query instead of N+1) ──
+        paper_avg_subquery = Subquery(
+            PaperSubmission.objects.filter(
+                test__classroom=OuterRef('pk'),
                 test__created_by=user,
                 total_score__isnull=False
-            ).aggregate(avg=Avg('total_score'))['avg']
-
-            # Online average
-            online_avg = ExamAttempt.objects.filter(
-                exam__classroom=classroom,
+            ).values('test__classroom').annotate(avg=Avg('total_score')).values('avg')[:1],
+            output_field=FloatField()
+        )
+        online_avg_subquery = Subquery(
+            ExamAttempt.objects.filter(
+                exam__classroom=OuterRef('pk'),
                 exam__created_by=user,
                 status='COMPLETED',
                 final_score__isnull=False
-            ).aggregate(avg=Avg('final_score'))['avg']
+            ).values('exam__classroom').annotate(avg=Avg('final_score')).values('avg')[:1],
+            output_field=FloatField()
+        )
+        classrooms = Classroom.objects.filter(teacher=user).annotate(
+            avg_score_paper=paper_avg_subquery,
+            avg_score_online=online_avg_subquery,
+        )
 
+        class_averages = []
+        for classroom in classrooms:
             class_averages.append({
                 'class_id': classroom.id,
                 'class_name': classroom.name,
-                'avg_score_paper': round(float(paper_avg), 2) if paper_avg else None,
-                'avg_score_online': round(float(online_avg), 2) if online_avg else None,
+                'avg_score_paper': round(float(classroom.avg_score_paper), 2) if classroom.avg_score_paper else None,
+                'avg_score_online': round(float(classroom.avg_score_online), 2) if classroom.avg_score_online else None,
             })
 
         # ── 2. TEST AVERAGES (paper + online) ──
@@ -355,22 +367,34 @@ class StatisticViewSet(viewsets.ViewSet):
             })
 
         # ── 3. TOP STUDENTS BY CLASS (online only) ──
-        top_students_by_class = {}
-        for classroom in classrooms:
-            completed_attempts = ExamAttempt.objects.filter(
-                exam__classroom=classroom,
-                exam__created_by=user,
-                status='COMPLETED',
-                final_score__isnull=False
-            ).values(
-                'student__id', 'student__name', 'student__student_id'
-            ).annotate(
-                avg_score=Avg('final_score'),
-                attempts_count=Count('id')
-            ).order_by('-avg_score')[:10]
+        # Batch query: all completed attempts for user's classrooms in one query
+        classroom_ids = list(classrooms.values_list('id', flat=True))
+        all_student_stats = ExamAttempt.objects.filter(
+            exam__classroom_id__in=classroom_ids,
+            exam__created_by=user,
+            status='COMPLETED',
+            final_score__isnull=False
+        ).values(
+            'exam__classroom_id', 'student__id', 'student__name', 'student__student_id'
+        ).annotate(
+            avg_score=Avg('final_score'),
+            attempts_count=Count('id')
+        ).order_by('exam__classroom_id', '-avg_score')
 
+        # Group by classroom and take top 10
+        classroom_name_map = {c.id: c.name for c in classrooms}
+        top_students_by_class = {}
+        class_students = {}
+        for entry in all_student_stats:
+            cid = entry['exam__classroom_id']
+            if cid not in class_students:
+                class_students[cid] = []
+            if len(class_students[cid]) < 10:
+                class_students[cid].append(entry)
+
+        for cid, students in class_students.items():
             students_list = []
-            for rank, entry in enumerate(completed_attempts, 1):
+            for rank, entry in enumerate(students, 1):
                 students_list.append({
                     'rank': rank,
                     'id': entry['student__id'],
@@ -379,9 +403,8 @@ class StatisticViewSet(viewsets.ViewSet):
                     'avg_score': round(float(entry['avg_score']), 2),
                     'attempts_count': entry['attempts_count'],
                 })
-
-            top_students_by_class[str(classroom.id)] = {
-                'class_name': classroom.name,
+            top_students_by_class[str(cid)] = {
+                'class_name': classroom_name_map.get(cid, ''),
                 'students': students_list,
             }
 
@@ -392,7 +415,6 @@ class StatisticViewSet(viewsets.ViewSet):
         }, status=status.HTTP_200_OK)
 
 
-# ==================== SUBMISSION ====================
 class SubmissionViewSet(viewsets.ModelViewSet):
     serializer_class = SubmissionSerializer
     permission_classes = [IsAuthenticated]
@@ -420,7 +442,6 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         test = get_object_or_404(PaperTest, id=test_id)
         if 'submission_image' not in request.FILES:
             return Response({"error": "Image is required"}, status=status.HTTP_400_BAD_REQUEST)
-        # student_id is optional - MSSV will be auto-detected from OMR bubbles
         student = None
         student_id = request.data.get('student_id')
         if student_id:
@@ -430,26 +451,43 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                 pass
 
         submission = None
+        tmp_image_path = None
         try:
-            upload_result = cloudinary.uploader.upload(request.FILES['submission_image'], folder="submissions")
+            from .omr_processing import process_submission_local
+            import tempfile as _tempfile
+
+ # Step 1: Save uploaded file to local temp (instant, no network)
+            uploaded_file = request.FILES['submission_image']
+            with _tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                for chunk in uploaded_file.chunks():
+                    tmp_file.write(chunk)
+                tmp_image_path = tmp_file.name
+
+ # Step 2: Create submission record (no Cloudinary upload yet)
             submission = PaperSubmission.objects.create(
                 test=test, user=request.user, student=student,
-                submission_image=upload_result['secure_url']
+                submission_image=''  # Will be filled by background thread
             )
 
-            # ✅ Process synchronously — if error, we can rollback
-            result = process_submission_cloudinary(submission.id, upload_result['secure_url'])
+ # Step 3: Process OMR from local file → returns base64 graded image
+            result_submission, graded_base64 = process_submission_local(
+                submission.id, tmp_image_path
+            )
 
+            submission.refresh_from_db()
+
+ # Return base64 image for INSTANT frontend display
+ # (Cloudinary upload happens in background — user sees result immediately)
             return Response({
                 "submission_id": submission.id,
                 "message": "Graded successfully!",
                 "detected_mssv": submission.detected_mssv or '',
                 "variant_code": submission.variant.variant_code if submission.variant else '',
                 "total_score": submission.total_score,
+                "submission_image": f"data:image/jpeg;base64,{graded_base64}",
             }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            # On ANY error: delete submission from DB so no bad data is saved
             if submission:
                 try:
                     submission.delete()
@@ -458,8 +496,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
 
             error_msg = str(e)
 
-            # Classify error for frontend
-            if "not found" in error_msg.lower() and "test id" in error_msg.lower():
+            if "max retries exceeded" in error_msg.lower() or "getaddrinfo failed" in error_msg.lower():
+                error_msg = "Network error: Cannot connect to the image server. Please check your internet connection."
+                error_code = "NETWORK_ERROR"
+            elif "not found" in error_msg.lower() and "test id" in error_msg.lower():
                 error_code = "VARIANT_NOT_FOUND"
             elif "cannot read digit" in error_msg.lower():
                 error_code = "TEST_ID_UNREADABLE"
@@ -476,6 +516,14 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                 "error": error_msg,
                 "error_code": error_code,
             }, status=status.HTTP_400_BAD_REQUEST)
+        finally:
+ # Always clean up temp file
+            if tmp_image_path:
+                try:
+                    import os as _os
+                    _os.unlink(tmp_image_path)
+                except:
+                    pass
 
     @action(detail=False, methods=['post'])
     def upload_batch(self, request):
@@ -497,6 +545,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         if not files:
             return Response({"error": "At least one image is required", "error_code": "NO_IMAGES"},
                             status=status.HTTP_400_BAD_REQUEST)
+                            
+        if len(files) > 20:
+            return Response({"error": "Maximum 20 images allowed per batch to prevent server overload.", "error_code": "TOO_MANY_IMAGES"},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         results = []
         success_count = 0
@@ -504,15 +556,25 @@ class SubmissionViewSet(viewsets.ModelViewSet):
 
         for idx, file in enumerate(files):
             submission = None
+            tmp_image_path = None
             try:
-                upload_result = cloudinary.uploader.upload(file, folder="submissions")
+                import tempfile as _tempfile
+                from .omr_processing import process_submission_local
+
+ # Save to local temp file
+                with _tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                    for chunk in file.chunks():
+                        tmp_file.write(chunk)
+                    tmp_image_path = tmp_file.name
+
                 submission = PaperSubmission.objects.create(
                     test=test, user=request.user,
-                    submission_image=upload_result['secure_url']
+                    submission_image=''
                 )
 
-                process_submission_cloudinary(submission.id, upload_result['secure_url'])
-                # Reload to get updated fields
+                result_sub, graded_base64 = process_submission_local(
+                    submission.id, tmp_image_path
+                )
                 submission.refresh_from_db()
 
                 results.append({
@@ -523,6 +585,7 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                     "detected_mssv": submission.detected_mssv or '',
                     "variant_code": submission.variant.variant_code if submission.variant else '',
                     "total_score": submission.total_score,
+                    "submission_image": f"data:image/jpeg;base64,{graded_base64}",
                 })
                 success_count += 1
 
@@ -534,7 +597,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                         pass
 
                 error_msg = str(e)
-                if "not found" in error_msg.lower() and "test id" in error_msg.lower():
+                if "max retries exceeded" in error_msg.lower() or "getaddrinfo failed" in error_msg.lower():
+                    error_msg = "Network error: Cannot connect to the image server. Please check your internet connection."
+                    error_code = "NETWORK_ERROR"
+                elif "not found" in error_msg.lower() and "test id" in error_msg.lower():
                     error_code = "VARIANT_NOT_FOUND"
                 elif "cannot read digit" in error_msg.lower():
                     error_code = "TEST_ID_UNREADABLE"
@@ -555,6 +621,13 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                     "error_code": error_code,
                 })
                 fail_count += 1
+            finally:
+                if tmp_image_path:
+                    try:
+                        import os as _os
+                        _os.unlink(tmp_image_path)
+                    except:
+                        pass
 
         return Response({
             "results": results,
@@ -571,6 +644,7 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().select_related('test', 'student', 'user', 'variant')
         if test_id:
             queryset = queryset.filter(test_id=test_id)
+        queryset = queryset.order_by('-submitted_at')
         data = []
         for sub in queryset:
             data.append({

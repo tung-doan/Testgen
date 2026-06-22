@@ -8,13 +8,15 @@ import { Input } from "@/components/ui/input";
 import Header from "@/components/Header";
 import { useAuth } from "@/hooks/useAuth";
 import { User, Lock, GraduationCap } from "lucide-react";
+import { LoginSkeleton } from "@/components/ui/skeletons";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, actionLoading, authError } = useAuth();
+  const { login, actionLoading, authError, loading } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState("");
+  const [isNavigating, setIsNavigating] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,14 +28,29 @@ export default function LoginPage() {
     }
 
     try {
-      await login({ username, password }, false);
-      // Trigger progress bar trước khi chuyển trang
+      setIsNavigating(true);
+      // Trigger progress bar ngay khi bắt đầu login
       window.dispatchEvent(new Event("navigation-start"));
+      await login({ username, password }, false);
       router.push("/class");
     } catch (error) {
+      // Nếu lỗi thì kết thúc progress bar
+      window.dispatchEvent(new Event("navigation-end"));
+      setIsNavigating(false);
       setFormError(error.message || "Login failed");
     }
   };
+
+  if (loading) {
+    return (
+      <>
+        <Header />
+        <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-6">
+          <LoginSkeleton />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -106,25 +123,23 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                   />
                 </div>
+                <div className="text-right">
+                  <Link
+                    href="/forgot-password"
+                    className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
 
-              {/* Submit Button */}
+               {/* Submit Button */}
               <Button
                 type="submit"
                 className="w-full h-12 mt-6 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg text-base font-semibold shadow-lg hover:shadow-xl hover:cursor-pointer transition-all duration-300"
-                disabled={actionLoading}
+                disabled={actionLoading || isNavigating}
               >
-                {actionLoading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Signing in...
-                  </span>
-                ) : (
-                  "Login"
-                )}
+                {actionLoading || isNavigating ? "Signing in..." : "Login"}
               </Button>
             </form>
 

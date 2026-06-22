@@ -47,6 +47,17 @@ export function useOnlineExam() {
     }
   }, []);
 
+  const saveAnswers = useCallback(async (attemptId, answers) => {
+    try {
+      const data = await OnlineExamService.saveAnswers(attemptId, answers);
+      return data;
+    } catch (err) {
+      // Silent fail for auto-save - don't set error state
+      console.warn("Auto-save failed:", err.message);
+      throw err;
+    }
+  }, []);
+
   const submitExam = useCallback(async (attemptId, answers) => {
     try {
       setLoading(true);
@@ -69,7 +80,8 @@ export function useOnlineExam() {
       const response = await OnlineExamService.getCompletedExams(studentId);
       return response.data;
     } catch (err) {
-      const errorMsg = err.response?.data?.error || "Failed to fetch completed exams";
+      const errorMsg =
+        err.response?.data?.error || "Failed to fetch completed exams";
       setError(errorMsg);
       throw new Error(errorMsg);
     } finally {
@@ -83,6 +95,7 @@ export function useOnlineExam() {
     getPendingExams,
     startExam,
     getExamAttempt,
+    saveAnswers,
     submitExam,
     getCompletedExams,
   };

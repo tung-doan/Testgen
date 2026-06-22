@@ -27,6 +27,8 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export default function StudentHistory() {
@@ -38,6 +40,12 @@ export default function StudentHistory() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("desc"); // desc = newest first
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, sortOrder]);
 
   useEffect(() => {
     loadHistory();
@@ -127,6 +135,30 @@ export default function StudentHistory() {
 
   const stats = calculateStats();
 
+  const totalPages = Math.ceil(filteredExams.length / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const currentExams = filteredExams.slice(startIndex, startIndex + rowsPerPage);
+
+  // Auto-adjust pagination
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const maxPagesToShow = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+  let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+  if (endPage - startPage + 1 < maxPagesToShow) {
+    startPage = Math.max(1, endPage - maxPagesToShow + 1);
+  }
+
+  const pageNumbers = [];
+  for (let i = startPage; i <= endPage; i++) {
+    pageNumbers.push(i);
+  }
+
   if (loading) {
     return <HistoryLoading />;
   }
@@ -138,7 +170,7 @@ export default function StudentHistory() {
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 py-8 px-4">
         <div className="max-w-7xl mx-auto space-y-6">
           {/* Page Header */}
-          <Card className="border-0 shadow-xl overflow-hidden !p-0">
+          <Card className="border-0 shadow-xl overflow-hidden !p-0 mb-4">
             <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white !p-0 !m-0">
               <div className="flex items-center justify-between px-6 py-5">
                 <div className="flex items-center gap-4">
@@ -160,77 +192,11 @@ export default function StudentHistory() {
             </CardHeader>
           </Card>
 
-          {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Total Exams</p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      {stats.totalExams}
-                    </p>
-                  </div>
-                  <div className="bg-blue-100 p-3 rounded-full">
-                    <BarChart3 className="h-6 w-6 text-blue-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Average Score</p>
-                    <p className="text-3xl font-bold text-purple-600">
-                      {stats.averageScore}
-                    </p>
-                  </div>
-                  <div className="bg-purple-100 p-3 rounded-full">
-                    <Award className="h-6 w-6 text-purple-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Highest Score</p>
-                    <p className="text-3xl font-bold text-green-600">
-                      {stats.highestScore}
-                    </p>
-                  </div>
-                  <div className="bg-green-100 p-3 rounded-full">
-                    <TrendingUp className="h-6 w-6 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Lowest Score</p>
-                    <p className="text-3xl font-bold text-orange-600">
-                      {stats.lowestScore}
-                    </p>
-                  </div>
-                  <div className="bg-orange-100 p-3 rounded-full">
-                    <TrendingDown className="h-6 w-6 text-orange-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
 
           {/* Exam List */}
-          <Card className="border-0 shadow-xl">
+          <Card className="border-0 shadow-xl !p-0">
             <CardHeader className="border-b bg-gradient-to-r from-gray-50 to-gray-100">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-2">
                 <CardTitle className="text-xl">Completed Exams</CardTitle>
                 <div className="flex items-center gap-3">
                   {/* Search */}
@@ -294,16 +260,13 @@ export default function StudentHistory() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredExams.map((exam) => (
+                      {currentExams.map((exam) => (
                         <TableRow
                           key={exam.id}
                           className="hover:bg-gray-50 transition-colors"
                         >
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <div className="bg-blue-100 p-2 rounded">
-                                <BarChart3 className="h-4 w-4 text-blue-600" />
-                              </div>
                               <span className="font-medium">
                                 {exam.exam_detail.title}
                               </span>
@@ -350,8 +313,9 @@ export default function StudentHistory() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() =>
-                                router.push(`/student/results/${exam.id}`)
+                              onClick={() =>{
+                                window.dispatchEvent(new Event("navigation-start"))
+                                router.push(`/student/results/${exam.id}`)}
                               }
                               className="hover:bg-blue-50"
                             >
@@ -363,6 +327,54 @@ export default function StudentHistory() {
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+              )}
+
+              {!loading && filteredExams.length > 0 && totalPages > 1 && (
+                <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100 bg-gray-50/50 mt-4 rounded-b-lg">
+                  <Button
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    variant="outline"
+                    className="gap-1 text-sm bg-white"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  <div className="flex items-center space-x-1">
+                    {pageNumbers.map((page) => (
+                      <Button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        variant={currentPage === page ? "default" : "ghost"}
+                        size="sm"
+                        className={
+                          currentPage === page
+                            ? "bg-blue-600 hover:bg-blue-700 text-white"
+                            : "text-gray-600 hover:text-gray-900"
+                        }
+                      >
+                        {page}
+                      </Button>
+                    ))}
+                  </div>
+                  <Button
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage >= totalPages}
+                    variant="outline"
+                    className="gap-1 text-sm bg-white"
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+
+              {!loading && filteredExams.length > 0 && (
+                <div className="px-6 py-3 border-t border-gray-100/0 bg-transparent mt-2">
+                  <p className="text-gray-500 text-xs text-center">
+                    Page {currentPage} of {totalPages} · {filteredExams.length} exam{filteredExams.length !== 1 ? "s" : ""} total
+                  </p>
                 </div>
               )}
             </CardContent>

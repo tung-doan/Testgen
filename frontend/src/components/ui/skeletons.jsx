@@ -127,7 +127,8 @@ export function ChartSkeleton() {
 export function HeaderSkeleton() {
   return (
     <header className="w-full bg-[#dfdfdf] py-6 shadow-md">
-      <div className="container max-w-[1152px] mx-auto flex justify-between items-center">
+      <div className="container max-w-[1152px] mx-auto flex justify-between items-center"
+      suppressHydrationWarning={true}>
         <div className="flex items-center gap-2">
           <SkeletonPulse className="w-12 h-12 rounded-lg" />
           <SkeletonPulse className="h-6 w-24" />
@@ -139,5 +140,34 @@ export function HeaderSkeleton() {
         </div>
       </div>
     </header>
+  );
+}
+// ============================================
+// LOGIN SKELETON - Cho trang login, student-login
+// ============================================
+export function LoginSkeleton() {
+  return (
+    <div className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-white border-0">
+      <div className="text-center mb-8 flex flex-col items-center">
+        <SkeletonPulse className="w-20 h-20 rounded-full mb-4" />
+        <SkeletonPulse className="h-10 w-48 mb-2" />
+        <SkeletonPulse className="h-4 w-64" />
+      </div>
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <SkeletonPulse className="h-4 w-24" />
+          <SkeletonPulse className="h-12 w-full rounded-lg" />
+        </div>
+        <div className="space-y-2">
+          <SkeletonPulse className="h-4 w-24" />
+          <SkeletonPulse className="h-12 w-full rounded-lg" />
+        </div>
+        <SkeletonPulse className="h-12 w-full rounded-lg mt-6" />
+        <div className="pt-6 border-t border-gray-100 flex flex-col items-center gap-3">
+          <SkeletonPulse className="h-4 w-32" />
+          <SkeletonPulse className="h-11 w-full rounded-lg" />
+        </div>
+      </div>
+    </div>
   );
 }

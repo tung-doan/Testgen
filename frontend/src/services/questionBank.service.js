@@ -61,6 +61,9 @@ const QuestionBankService = {
   getSectionQuestions: (sectionId) =>
     apiClient.get(`question-bank/sections/${sectionId}/questions/`),
 
+  getDeletedQuestions: (sectionId) =>
+    apiClient.get(`question-bank/sections/${sectionId}/deleted_questions/`),
+
   // Question APIs
   getAllQuestions: (filters = {}) => {
     const params = new URLSearchParams(filters);
@@ -71,17 +74,25 @@ const QuestionBankService = {
   updateQuestion: (id, data) =>
     apiClient.put(`question-bank/questions/${id}/`, data),
 
-  deleteQuestion: (id) => apiClient.delete(`question-bank/questions/${id}/`),
+  deleteQuestion: (id, force = false) => 
+    apiClient.delete(`question-bank/questions/${id}/`, { params: { force } }),
 
-  bulkDeleteQuestions: (questionIds) => apiClient.post(
-    "question-bank/questions/bulk-delete/",
-    { question_ids: questionIds }
-  ),
+  bulkDeleteQuestions: (questionIds, force = false) =>
+    apiClient.post("question-bank/questions/bulk-delete/", {
+      question_ids: questionIds,
+      force: force
+    }),
 
   getQuestionDetails: (id) => apiClient.get(`question-bank/questions/${id}/`),
 
   duplicateQuestion: (id) =>
     apiClient.post(`question-bank/questions/${id}/duplicate/`),
+
+  restoreQuestion: (id) => 
+    apiClient.post(`question-bank/questions/${id}/restore/`),
+
+  permanentDeleteQuestion: (id) =>
+    apiClient.delete(`question-bank/questions/${id}/permanent_delete/`),
 
   uploadQuestions: (formData) => {
     console.log("Uploading questions...");
@@ -90,6 +101,7 @@ const QuestionBankService = {
       formData,
       {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000, // 60s timeout for large files
       },
     );
   },

@@ -47,7 +47,7 @@ export default function DeleteConfirmButton({
           e.stopPropagation();
           setOpen(true);
         }}
-        className={`gap-1.5 text-xs px-3 py-1.5 h-8 transition-all duration-150 text-red-500 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 ${className}`}
+        className={`gap-1.5 text-xs px-3 py-1.5 h-8 transition-all cursor-pointer duration-150 text-red-500 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 ${className}`}
       >
         <Icon className="h-3.5 w-3.5" />
         {buttonText && <span>{buttonText}</span>}
@@ -61,6 +61,7 @@ export default function DeleteConfirmButton({
           </DialogHeader>
           <DialogFooter>
             <Button
+              className="cursor-pointer hover:bg-gray-200"
               variant="outline"
               onClick={(e) => {
                 e.stopPropagation();
@@ -71,6 +72,7 @@ export default function DeleteConfirmButton({
               Cancel
             </Button>
             <Button
+              className="cursor-pointer hover:bg-red-800"
               variant="destructive"
               onClick={handleDelete}
               disabled={loading}

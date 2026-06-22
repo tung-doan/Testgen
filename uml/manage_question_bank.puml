@@ -1,0 +1,160 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor #FFFFCC
+    BorderColor #333333
+    ArrowColor #333333
+}
+
+package "pkg Manage Question Bank" {
+
+    ' =================== BOUNDARY ===================
+    class SubjectChapterView <<boundary>> {
+        + addSubject(name : String) : void
+        + updateSubject(subjectId : int, name : String) : void
+        + deleteSubject(subjectId : int) : void
+        + selectSubject(subjectId : int) : void
+        + addChapter(subjectId : int, name : String, order : int) : void
+        + updateChapter(chapterId : int, name : String) : void
+        + deleteChapter(chapterId : int) : void
+        + selectChapter(chapterId : int) : void
+        + addSection(chapterId : int, name : String, order : int) : void
+        + updateSection(sectionId : int, name : String) : void
+        + deleteSection(sectionId : int) : void
+        + selectSection(sectionId : int) : void
+    }
+
+    class QuestionListView <<boundary>> {
+        + addQuestion(sectionId : int) : void
+        + editQuestion(questionId : int) : void
+        + deleteQuestion(questionId : int) : void
+        + bulkDeleteQuestions(questionIds : List) : void
+        + duplicateQuestion(questionId : int) : void
+        + restoreQuestion(questionId : int) : void
+        + permanentDelete(questionId : int) : void
+        + filterByType(type : String) : void
+        + search(keyword : String) : void
+    }
+
+    class UploadWordView <<boundary>> {
+        + selectFile(file : File) : void
+        + validateFileSize(file : File) : boolean
+        + validateFileFormat(file : File) : boolean
+        + uploadFile(file : File, sectionId : int) : void
+    }
+
+    ' =================== CONTROL ===================
+    class QuestionBankController <<control>> {
+        - apiClient : AxiosInstance
+        + getAllSubjects() : List
+        + createSubject(data : Object) : Subject
+        + updateSubject(id : int, data : Object) : Subject
+        + deleteSubject(id : int) : void
+        + getChapters(subjectId : int) : List
+        + createChapter(data : Object) : Chapter
+        + updateChapter(id : int, data : Object) : Chapter
+        + deleteChapter(id : int) : void
+        + getSections(chapterId : int) : List
+        + createSection(data : Object) : Section
+        + updateSection(id : int, data : Object) : Section
+        + deleteSection(id : int) : void
+        + getQuestions(sectionId : int) : List
+        + createQuestion(data : Object) : Question
+        + updateQuestion(id : int, data : Object) : Question
+        + deleteQuestion(id : int, force : boolean) : void
+        + bulkDelete(ids : List, force : boolean) : void
+        + duplicateQuestion(id : int) : Question
+        + restoreQuestion(id : int) : void
+        + permanentDelete(id : int) : void
+        + uploadQuestions(file : File, sectionId : int) : Object
+        + getDeletedQuestions(sectionId : int) : List
+    }
+
+    class WordDocumentParser <<control>> {
+        - QUESTION_PATTERN_EN : Regex
+        - QUESTION_PATTERN_VI : Regex
+        - ANSWER_PATTERN_EN : Regex
+        - ANSWER_PATTERN_VI : Regex
+        - OPTION_PATTERN : Regex
+        + detectLanguage(text : String) : String
+        + detectQuestionType(prompt : String, options : List) : String
+        + parseDocument(filePath : String) : List
+        + validateQuestions(rawQuestions : List) : List
+        + extractImages(paragraph : Object) : List
+        + uploadImageToCloudinary(imageBlob : Bytes) : String
+        + buildQuestionData(info : Object, options : List, answer : String) : Object
+    }
+
+    ' =================== ENTITY ===================
+    class Subject <<entity>> {
+        - id : int
+        - name : String
+        - created_by : int
+        - created_at : DateTime
+        - updated_at : DateTime
+    }
+
+    class Chapter <<entity>> {
+        - id : int
+        - subject_id : int
+        - name : String
+        - order : int
+        - created_at : DateTime
+    }
+
+    class Section <<entity>> {
+        - id : int
+        - chapter_id : int
+        - name : String
+        - order : int
+        - created_at : DateTime
+    }
+
+    class Question <<entity>> {
+        - id : int
+        - section_id : int
+        - created_by : int
+        - prompt : String
+        - question_type : String
+        - correct_answer_text : String
+        - image : String
+        - is_active : boolean
+        - created_at : DateTime
+    }
+
+    class AnswerOption <<entity>> {
+        - id : int
+        - question_id : int
+        - text : String
+        - is_correct_bool : boolean
+        - correct_order : int
+        - order : int
+        + is_correct() : boolean
+    }
+
+    ' =================== RELATIONSHIPS ===================
+    ' Boundary --> Control (Dependency)
+    SubjectChapterView ..> QuestionBankController
+    QuestionListView ..> QuestionBankController
+    UploadWordView ..> QuestionBankController
+
+    ' Control --> Control (Dependency)
+    QuestionBankController ..> WordDocumentParser
+
+    ' Control --> Entity (Dependency)
+    QuestionBankController ..> Subject
+    QuestionBankController ..> Chapter
+    QuestionBankController ..> Section
+    QuestionBankController ..> Question
+    QuestionBankController ..> AnswerOption
+    WordDocumentParser ..> Question
+    WordDocumentParser ..> AnswerOption
+
+    ' Entity --> Entity (Composition)
+    Subject "1" *-- "*" Chapter
+    Chapter "1" *-- "*" Section
+    Section "1" *-- "*" Question
+    Question "1" *-- "*" AnswerOption
+}
+
+@enduml

@@ -1,0 +1,237 @@
+@startuml
+' Simplified ERD based on the current Django models.
+hide circle
+skinparam linetype ortho
+skinparam class {
+    BackgroundColor White
+    BorderColor #333333
+    ArrowColor #333333
+}
+
+' ===== ENTITIES =====
+
+' -- Account & Classroom --
+entity "User" as user {
+  * **id : int**
+  --
+  username : varchar
+  email : varchar
+  full_name : varchar
+  date_of_birth : date
+  gender : varchar
+  avatar : image
+}
+
+entity "Student" as student {
+  * **id : int**
+  --
+  user_id : int <<FK>>
+  name : varchar
+  student_id : varchar
+}
+
+entity "Classroom" as classroom {
+  * **id : int**
+  --
+  teacher_id : int <<FK>>
+  name : varchar
+  description : text
+}
+
+entity "EnrollmentRequest" as enrollment {
+  * **id : int**
+  --
+  student_id : int <<FK>>
+  classroom_id : int <<FK>>
+  invited_by_id : int <<FK>>
+  status : varchar
+  request_type : varchar
+}
+
+' -- Question Bank --
+entity "Subject" as subject {
+  * **id : int**
+  --
+  created_by_id : int <<FK>>
+  name : varchar
+}
+
+entity "Chapter" as chapter {
+  * **id : int**
+  --
+  subject_id : int <<FK>>
+  name : varchar
+  order : int
+}
+
+entity "Section" as section {
+  * **id : int**
+  --
+  chapter_id : int <<FK>>
+  name : varchar
+  order : int
+}
+
+entity "Question" as question {
+  * **id : int**
+  --
+  section_id : int <<FK>>
+  created_by_id : int <<FK>>
+  prompt : text
+  question_type : varchar
+  correct_answer_text : text
+  image : url
+  is_active : boolean
+}
+
+entity "AnswerOption" as option {
+  * **id : int**
+  --
+  question_id : int <<FK>>
+  text : text
+  is_correct_bool : boolean
+  correct_order : int
+  order : int
+}
+
+' -- Online Exams --
+entity "OnlineExam" as online_exam {
+  * **id : int**
+  --
+  created_by_id : int <<FK>>
+  classroom_id : int <<FK>>
+  title : varchar
+  duration_minutes : int
+  max_attempts : int
+  show_results_immediately: boolean
+  is_published : boolean
+  publish_at : datetime
+}
+
+entity "ExamQuestion" as exam_question {
+  * **id : int**
+  --
+  exam_id : int <<FK>>
+  question_id : int <<FK>>
+  order : int
+  points : float
+}
+
+entity "ExamAttempt" as attempt {
+  * **id : int**
+  --
+  exam_id : int <<FK>>
+  student_id : int <<FK>>
+  status : varchar
+  start_time : datetime
+  end_time : datetime
+  final_score : float
+}
+
+entity "OnlineAnswer" as online_answer {
+  * **id : int**
+  --
+  attempt_id : int <<FK>>
+  question_id : int <<FK>>
+  answer_data : json
+  score : float
+}
+
+' -- Paper Tests / OMR --
+entity "PaperTest" as paper_test {
+  * **id : int**
+  --
+  created_by_id : int <<FK>>
+  classroom_id : int <<FK>>
+  title : varchar
+  num_questions : int
+  num_choices : int
+  num_variants : int
+  allow_multiple_answers : boolean
+}
+
+entity "PaperTestQuestion" as paper_test_question {
+  * **id : int**
+  --
+  test_id : int <<FK>>
+  question_id : int <<FK>>
+  order : int
+}
+
+entity "PaperTestVariant" as variant {
+  * **id : int**
+  --
+  test_id : int <<FK>>
+  variant_code : varchar
+  question_order : json
+  answer_shuffles : json
+}
+
+entity "PaperSubmission" as submission {
+  * **id : int**
+  --
+  test_id : int <<FK>>
+  user_id : int <<FK>>
+  student_id : int <<FK>>
+  variant_id : int <<FK>>
+  detected_mssv : varchar
+  submission_image : image
+  total_score : float
+}
+
+entity "PaperAnswerDetected" as paper_answer {
+  * **id : int**
+  --
+  submission_id : int <<FK>>
+  paper_question_id : int <<FK>>
+  is_correct : boolean
+  score : float
+}
+
+entity "PaperUserAnswer" as paper_user_answer {
+  * **id : int**
+  --
+  submission_id : int <<FK>>
+  paper_question_id : int <<FK>>
+  selected_options : json
+}
+
+' ===== RELATIONSHIPS =====
+user ||--o| student : "profile"
+user ||--o{ classroom : "teaches"
+user ||--o{ subject : "creates"
+user ||--o{ question : "creates"
+
+student }o--o{ classroom : "enrolled in"
+student ||--o{ enrollment : "requests"
+classroom ||--o{ enrollment : "receives"
+user ||--o{ enrollment : "invites"
+
+subject ||--o{ chapter : "has"
+chapter ||--o{ section : "has"
+section ||--o{ question : "has"
+question ||--o{ option : "has"
+
+user ||--o{ online_exam : "creates"
+classroom ||--o{ online_exam : "assigned"
+online_exam ||--o{ exam_question : "contains"
+question ||--o{ exam_question : "used in"
+online_exam ||--o{ attempt : "has"
+student ||--o{ attempt : "takes"
+attempt ||--o{ online_answer : "submits"
+question ||--o{ online_answer : "answered"
+
+user ||--o{ paper_test : "creates"
+classroom ||--o{ paper_test : "assigned"
+paper_test ||--o{ paper_test_question : "contains"
+question ||--o{ paper_test_question : "used in"
+paper_test ||--o{ variant : "generates"
+paper_test ||--o{ submission : "receives"
+user ||--o{ submission : "uploads"
+variant ||--o{ submission : "uses"
+submission ||--o{ paper_answer : "detected"
+paper_test_question ||--o{ paper_answer : "graded for"
+submission ||--o{ paper_user_answer : "selected"
+paper_test_question ||--o{ paper_user_answer : "answered for"
+
+@enduml

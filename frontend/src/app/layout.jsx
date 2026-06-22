@@ -1,5 +1,3 @@
-"use client";
-
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/hooks/useAuth";
@@ -18,18 +16,18 @@ const geistMono = Geist_Mono({
 
 export default function RootLayout({ children }) {
   return (
-    <AuthProvider>
-      <LoadingProvider>
-        <html lang="en">
-          <body
-            suppressHydrationWarning={true}
-            className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-          >
+    <html lang="en" suppressHydrationWarning>
+      <body
+        suppressHydrationWarning
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <AuthProvider>
+          <LoadingProvider>
             <NavigationProgress />
             {children}
-          </body>
-        </html>
-      </LoadingProvider>
-    </AuthProvider>
+          </LoadingProvider>
+        </AuthProvider>
+      </body>
+    </html>
   );
 }

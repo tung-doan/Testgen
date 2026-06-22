@@ -1,19 +1,15 @@
 import { useState, useCallback } from "react";
-import axios from "axios";
+import apiClient from "@/services/api-client";
 
 export function useClassroom() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
   const getAllClassrooms = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(`${apiUrl}classroom/`, {
-        withCredentials: true,
-      });
+      const response = await apiClient.get(`classroom/`);
       return response.data;
     } catch (err) {
       const errorMsg =
@@ -26,16 +22,14 @@ export function useClassroom() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, []);
 
   const getClassroomById = useCallback(
     async (classroomId) => {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get(`${apiUrl}classroom/${classroomId}/`, {
-          withCredentials: true,
-        });
+        const response = await apiClient.get(`classroom/${classroomId}/`);
         return response.data;
       } catch (err) {
         const errorMsg =
@@ -46,7 +40,7 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const createClassroom = useCallback(
@@ -54,13 +48,7 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.post(
-          `${apiUrl}classroom/`,
-          classroomData,
-          {
-            withCredentials: true,
-          },
-        );
+        const response = await apiClient.post(`classroom/`, classroomData);
         return response.data;
       } catch (err) {
         const errorMsg =
@@ -71,7 +59,26 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
+  );
+
+  const updateClassroom = useCallback(
+    async (classroomId, classroomData) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiClient.patch(`classroom/${classroomId}/`, classroomData);
+        return response.data;
+      } catch (err) {
+        const errorMsg =
+          err.response?.data?.error || "Failed to update classroom";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
   );
 
   const deleteClassroom = useCallback(
@@ -79,12 +86,7 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.delete(
-          `${apiUrl}classroom/${classroomId}/`,
-          {
-            withCredentials: true,
-          },
-        );
+        const response = await apiClient.delete(`classroom/${classroomId}/`);
         return response.data;
       } catch (err) {
         const errorMsg =
@@ -95,7 +97,7 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const getStudents = useCallback(
@@ -103,11 +105,8 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get(
-          `${apiUrl}classroom/${classroomId}/students/`,
-          {
-            withCredentials: true,
-          },
+        const response = await apiClient.get(
+          `classroom/${classroomId}/students/`,
         );
         return response.data;
       } catch (err) {
@@ -119,7 +118,7 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const getClassroomStudentInfo = useCallback(
@@ -127,11 +126,8 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get(
-          `${apiUrl}classroom/student-info/?student_id=${studentId}`,
-          {
-            withCredentials: true,
-          },
+        const response = await apiClient.get(
+          `classroom/student-info/?student_id=${studentId}`,
         );
         return response.data;
       } catch (err) {
@@ -143,55 +139,7 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
-  );
-
-  const addStudent = useCallback(
-    async (classroomId, studentData) => {
-      try {
-        setLoading(true);
-        setError(null);
-        const payload = { ...studentData, classroom: classroomId };
-        const response = await axios.post(
-          `${apiUrl}classroom/students/`,
-          payload,
-          {
-            withCredentials: true,
-          },
-        );
-        return response.data;
-      } catch (err) {
-        const errorMsg = err.response?.data?.error || "Failed to add student";
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [apiUrl],
-  );
-
-  const addStudentToClassroom = useCallback(
-    async (studentId, classroomId) => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await axios.post(
-          `${apiUrl}classroom/students/${studentId}/add-to-classroom/`,
-          { classroom_id: classroomId },
-          { withCredentials: true },
-        );
-        return response.data;
-      } catch (err) {
-        const errorMsg =
-          err.response?.data?.error || "Failed to add student to classroom";
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [apiUrl],
+    [],
   );
 
   const deleteStudent = useCallback(
@@ -199,11 +147,8 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.delete(
-          `${apiUrl}classroom/students/${studentId}/`,
-          {
-            withCredentials: true,
-          },
+        const response = await apiClient.delete(
+          `classroom/students/${studentId}/`,
         );
         return response.data;
       } catch (err) {
@@ -215,20 +160,44 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   // ============================================
-  // Enrollment Request Methods
+  // Teacher Invitation Methods
+  // ============================================
+
+  const inviteStudent = useCallback(
+    async (classroomId, email) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiClient.post(
+          `classroom/${classroomId}/invite-student/`,
+          { email },
+        );
+        return response.data;
+      } catch (err) {
+        const errorMsg =
+          err.response?.data?.error || "Failed to send invitation";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  // ============================================
+  // Enrollment Request Methods (Student -> Teacher)
   // ============================================
 
   const getAllAvailableClassrooms = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(`${apiUrl}classroom/all/`, {
-        withCredentials: true,
-      });
+      const response = await apiClient.get(`classroom/all/`);
       return response.data;
     } catch (err) {
       const errorMsg =
@@ -238,17 +207,16 @@ export function useClassroom() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, []);
 
   const requestEnrollment = useCallback(
     async (classroomId) => {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.post(
-          `${apiUrl}classroom/enrollment-requests/`,
+        const response = await apiClient.post(
+          `classroom/enrollment-requests/`,
           { classroom_id: classroomId },
-          { withCredentials: true },
         );
         return response.data;
       } catch (err) {
@@ -260,7 +228,7 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const getEnrollmentRequests = useCallback(
@@ -268,9 +236,8 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get(
-          `${apiUrl}classroom/${classroomId}/enrollment-requests/?status=${statusFilter}`,
-          { withCredentials: true },
+        const response = await apiClient.get(
+          `classroom/${classroomId}/enrollment-requests/?status=${statusFilter}`,
         );
         return response.data;
       } catch (err) {
@@ -282,22 +249,21 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const getEnrollmentRequestsCount = useCallback(
     async (classroomId) => {
       try {
-        const response = await axios.get(
-          `${apiUrl}classroom/${classroomId}/enrollment-requests/count/`,
-          { withCredentials: true },
+        const response = await apiClient.get(
+          `classroom/${classroomId}/enrollment-requests/count/`,
         );
         return response.data.count;
       } catch (err) {
         return 0;
       }
     },
-    [apiUrl],
+    [],
   );
 
   const handleEnrollmentRequest = useCallback(
@@ -305,10 +271,9 @@ export function useClassroom() {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.patch(
-          `${apiUrl}classroom/enrollment-requests/${requestId}/action/`,
+        const response = await apiClient.patch(
+          `classroom/enrollment-requests/${requestId}/action/`,
           { action },
-          { withCredentials: true },
         );
         return response.data;
       } catch (err) {
@@ -320,16 +285,14 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
   );
 
   const getMyEnrolledClassrooms = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(`${apiUrl}classroom/my-classes/`, {
-        withCredentials: true,
-      });
+      const response = await apiClient.get(`classroom/my-classes/`);
       return response.data;
     } catch (err) {
       const errorMsg =
@@ -339,17 +302,16 @@ export function useClassroom() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, []);
 
   const unenrollFromClassroom = useCallback(
     async (classroomId) => {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.post(
-          `${apiUrl}classroom/students/remove-from-classroom-self/`,
+        const response = await apiClient.post(
+          `classroom/students/remove-from-classroom-self/`,
           { classroom_id: classroomId },
-          { withCredentials: true },
         );
         return response.data;
       } catch (err) {
@@ -361,7 +323,58 @@ export function useClassroom() {
         setLoading(false);
       }
     },
-    [apiUrl],
+    [],
+  );
+
+  // ============================================
+  // Student Invitation Methods (Teacher -> Student)
+  // ============================================
+
+  const getMyInvitations = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await apiClient.get(`classroom/my-invitations/`);
+      return response.data;
+    } catch (err) {
+      const errorMsg =
+        err.response?.data?.error || "Failed to fetch invitations";
+      setError(errorMsg);
+      throw new Error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const getMyInvitationsCount = useCallback(async () => {
+    try {
+      const response = await apiClient.get(`classroom/my-invitations/count/`);
+      return response.data.count;
+    } catch (err) {
+      return 0;
+    }
+  }, []);
+
+  const handleInvitation = useCallback(
+    async (invitationId, action) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiClient.patch(
+          `classroom/invitations/${invitationId}/action/`,
+          { action },
+        );
+        return response.data;
+      } catch (err) {
+        const errorMsg =
+          err.response?.data?.error || "Failed to handle invitation";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
   );
 
   return {
@@ -370,13 +383,14 @@ export function useClassroom() {
     getAllClassrooms,
     getClassroomById,
     createClassroom,
+    updateClassroom,
     deleteClassroom,
     getStudents,
-    addStudent,
     deleteStudent,
     getClassroomStudentInfo,
-    addStudentToClassroom,
-    // Enrollment
+    // Teacher invitation
+    inviteStudent,
+    // Enrollment (student -> teacher)
     getAllAvailableClassrooms,
     requestEnrollment,
     getEnrollmentRequests,
@@ -384,6 +398,10 @@ export function useClassroom() {
     handleEnrollmentRequest,
     getMyEnrolledClassrooms,
     unenrollFromClassroom,
+    // Student invitations (teacher -> student)
+    getMyInvitations,
+    getMyInvitationsCount,
+    handleInvitation,
   };
 }
 

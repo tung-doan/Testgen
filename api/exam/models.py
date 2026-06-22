@@ -76,7 +76,8 @@ class PaperTestVariant(models.Model):
         Returns: {question_index: [correct_indices_after_shuffle]}
         """
         answer_key = {}
-        test_questions = {pq.question.id: pq for pq in self.test.paper_questions.all()}
+        # Prefetch options to avoid N+1 queries (each get_correct_answer_indices() would trigger a query)
+        test_questions = {pq.question.id: pq for pq in self.test.paper_questions.select_related('question').prefetch_related('question__options').all()}
         
         for idx, question_id in enumerate(self.question_order):
             paper_question = test_questions.get(question_id)

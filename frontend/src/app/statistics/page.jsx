@@ -93,27 +93,66 @@ export default function Statistic() {
   // ── Chart: Class Averages ──
   const classChartData = useMemo(() => {
     if (!data?.class_averages?.length) return null;
-    const labels = data.class_averages.map((c) => c.class_name);
+
+    const labels = [];
+    const values = [];
+    const bgColors = [];
+    const borderColors = [];
+    const types = []; // store type for tooltip
+    
+    data.class_averages.forEach(c => {
+      const paperScore = c.avg_score_paper || 0;
+      const onlineScore = c.avg_score_online || 0;
+      const hasPaper = paperScore > 0;
+      const hasOnline = onlineScore > 0;
+      
+      if (hasPaper) {
+        labels.push(hasOnline ? `${c.class_name} (Paper)` : c.class_name);
+        values.push(paperScore);
+        bgColors.push("rgba(99,102,241,0.7)"); // Purple
+        borderColors.push("rgba(99,102,241,1)");
+        types.push("Paper");
+      }
+      
+      if (hasOnline) {
+        labels.push(hasPaper ? `${c.class_name} (Online)` : c.class_name);
+        values.push(onlineScore);
+        bgColors.push("rgba(16,185,129,0.7)"); // Green
+        borderColors.push("rgba(16,185,129,1)");
+        types.push("Online");
+      }
+    });
+
+    if (values.length === 0) {
+      return {
+        labels: data.class_averages.map(c => c.class_name),
+        datasets: [{
+          label: "No Test Data",
+          data: data.class_averages.map(() => 0),
+          backgroundColor: "rgba(203,213,225,0.5)",
+          borderColor: "rgba(203,213,225,1)",
+          borderWidth: 2,
+          borderRadius: 6,
+          maxBarThickness: 45,
+        }],
+        meta: []
+      };
+    }
+
     return {
       labels,
       datasets: [
         {
-          label: "Paper Test",
-          data: data.class_averages.map((c) => c.avg_score_paper ?? 0),
-          backgroundColor: "rgba(59,130,246,0.7)",
-          borderColor: "rgba(59,130,246,1)",
+          label: "Average Score",
+          data: values,
+          backgroundColor: bgColors,
+          borderColor: borderColors,
           borderWidth: 2,
           borderRadius: 6,
-        },
-        {
-          label: "Online Test",
-          data: data.class_averages.map((c) => c.avg_score_online ?? 0),
-          backgroundColor: "rgba(16,185,129,0.7)",
-          borderColor: "rgba(16,185,129,1)",
-          borderWidth: 2,
-          borderRadius: 6,
-        },
+          maxBarThickness: 45,
+        }
       ],
+      meta: types
     };
   }, [data]);
 
@@ -141,6 +180,7 @@ export default function Statistic() {
           ),
           borderWidth: 2,
           borderRadius: 6,
+          maxBarThickness: 45,
         },
       ],
     };
@@ -209,6 +249,7 @@ export default function Statistic() {
           ),
           borderWidth: 2,
           borderRadius: 6,
+          maxBarThickness: 30,
         },
       ],
     };
@@ -306,7 +347,16 @@ export default function Statistic() {
                       Average Score by Class
                     </CardTitle>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      Compare paper and online test results
+                      <span
+                        className="inline-block w-3 h-3 rounded-sm mr-1"
+                        style={{ backgroundColor: "rgba(99,102,241,0.7)" }}
+                      />
+                      Paper
+                      <span
+                        className="inline-block w-3 h-3 rounded-sm ml-3 mr-1"
+                        style={{ backgroundColor: "rgba(16,185,129,0.7)" }}
+                      />
+                      Online
                     </p>
                   </div>
                 </div>
@@ -314,7 +364,27 @@ export default function Statistic() {
               <CardContent className="pt-6">
                 {classChartData ? (
                   <div style={{ height: 300 }}>
-                    <Bar data={classChartData} options={baseBarOptions} />
+                    <Bar 
+                      data={classChartData} 
+                      options={{
+                        ...baseBarOptions,
+                        plugins: {
+                          ...baseBarOptions.plugins,
+                          legend: { display: false },
+                          tooltip: {
+                            ...baseBarOptions.plugins.tooltip,
+                            callbacks: {
+                              title: (items) => items[0].label,
+                              label: (item) => ` Average score: ${item.raw}`,
+                              afterLabel: (item) => {
+                                const type = classChartData.meta[item.dataIndex];
+                                return type ? `Type: ${type}` : "";
+                              },
+                            },
+                          },
+                        },
+                      }} 
+                    />
                   </div>
                 ) : (
                   <EmptyState

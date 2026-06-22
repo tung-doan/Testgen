@@ -17,22 +17,22 @@ export default function QuestionInput({
 
   const options = question.answer_options || [];
 
-  // MULTIPLE CHOICE
+ // MULTIPLE CHOICE
   if (question.question_type === "MC") {
     if (options.length === 0) {
       return <div className="text-red-500">No options available</div>;
     }
 
-    // ✅ SỬA: Lấy cờ từ Backend thay vì tự tính
+ // SỬA: Lấy cờ từ Backend thay vì tự tính
     const isMultiple = question.allow_multiple_answers;
 
     if (isMultiple) {
-      // --- CHECKBOX (Nhiều đáp án) ---
+ // --- CHECKBOX (Nhiều đáp án) ---
       const selected = currentAnswer?.selected_options || [];
       return (
         <div className="space-y-3">
           <p className="text-sm text-blue-600 mb-2 font-medium bg-blue-50 p-2 rounded inline-block">
-            * Chọn nhiều đáp án (Select multiple)
+            * Select multiple answers
           </p>
           {options.map((option, index) => {
             const isSelected = selected.includes(option.id);
@@ -75,13 +75,13 @@ export default function QuestionInput({
         </div>
       );
     } else {
-      // --- RADIO (Một đáp án) ---
+ // --- RADIO (Một đáp án) ---
       const selected = currentAnswer?.selected_options?.[0];
       return (
         <div className="space-y-3">
           {/* Có thể thêm dòng nhắc nhở chọn 1 */}
           <p className="text-sm text-gray-500 mb-2 italic">
-            * Chọn 1 đáp án đúng nhất
+            * Select the single best answer
           </p>
           {options.map((option, index) => {
             const isSelected = selected === option.id;
@@ -120,21 +120,19 @@ export default function QuestionInput({
     }
   }
 
-  // ==============================
-  // 2. TRUE/FALSE EXTENDED (TFE)
-  // ==============================
+ // 2. TRUE/FALSE EXTENDED (TFE)
   if (question.question_type === "TFE") {
-    // ✅ FIX: Dùng 'options' thay vì 'sub_questions'
+ // FIX: Dùng 'options' thay vì 'sub_questions'
     if (options.length === 0) {
       return <div className="text-red-500">No statements available</div>;
     }
 
-    // State lưu: [true, false, null, true...] tương ứng index
+ // State lưu: [true, false, null, true...] tương ứng index
     const currentResponses = currentAnswer?.answers || [];
 
     const handleTFEChange = (index, value) => {
       const newAnswers = [...currentResponses];
-      // Fill null nếu mảng chưa đủ dài
+ // Fill null nếu mảng chưa đủ dài
       while (newAnswers.length < options.length) {
         newAnswers.push(null);
       }
@@ -202,12 +200,10 @@ export default function QuestionInput({
     );
   }
 
-  // ==============================
-  // 3. ORDERING (ORD) - Fix lỗi xóa số
-  // ==============================
+ // 3. ORDERING (ORD) - Fix lỗi xóa số
   if (question.question_type === "ORD") {
-    // State lưu giá trị tạm thời khi đang gõ: { [itemId]: "giá_trị_đang_gõ" }
-    // eslint-disable-next-line
+ // State lưu giá trị tạm thời khi đang gõ: { [itemId]: "giá_trị_đang_gõ" }
+ // eslint-disable-next-line
     const [tempInputs, setTempInputs] = React.useState({});
 
     if (options.length === 0) {
@@ -216,7 +212,7 @@ export default function QuestionInput({
 
     const currentOrderIds = currentAnswer?.order || options.map((o) => o.id);
 
-    // 1. Hàm xử lý khi đang gõ (Cho phép xóa trắng)
+ // 1. Hàm xử lý khi đang gõ (Cho phép xóa trắng)
     const handleInputChange = (itemId, val) => {
       setTempInputs((prev) => ({
         ...prev,
@@ -224,24 +220,24 @@ export default function QuestionInput({
       }));
     };
 
-    // 2. Hàm chốt thay đổi (Sắp xếp lại list)
+ // 2. Hàm chốt thay đổi (Sắp xếp lại list)
     const commitChange = (itemId) => {
       const valStr = tempInputs[itemId];
 
-      // Xóa giá trị tạm để input quay về hiển thị thứ tự chính thức
+ // Xóa giá trị tạm để input quay về hiển thị thứ tự chính thức
       setTempInputs((prev) => {
         const next = { ...prev };
         delete next[itemId];
         return next;
       });
 
-      // Nếu người dùng xóa trắng hoặc không nhập gì -> Không làm gì cả (Revert)
+ // Nếu người dùng xóa trắng hoặc không nhập gì -> Không làm gì cả (Revert)
       if (valStr === "" || valStr === undefined) return;
 
       const newPosition = parseInt(valStr);
       if (isNaN(newPosition)) return;
 
-      // --- Logic Di Chuyển (Move) ---
+ // --- Logic Di Chuyển (Move) ---
       const newOrder = [...currentOrderIds];
       const currentIndex = newOrder.indexOf(itemId);
 
@@ -249,11 +245,11 @@ export default function QuestionInput({
         newOrder.splice(currentIndex, 1); // Xóa khỏi vị trí cũ
       }
 
-      // Chèn vào vị trí mới (Giới hạn trong khoảng hợp lệ)
-      // Input là 1, 2, 3... -> Index là 0, 1, 2...
+ // Chèn vào vị trí mới (Giới hạn trong khoảng hợp lệ)
+ // Input là 1, 2, 3... -> Index là 0, 1, 2...
       const targetIndex = Math.min(
         Math.max(0, newPosition - 1),
-        options.length - 1
+        options.length - 1,
       );
       newOrder.splice(targetIndex, 0, itemId);
 
@@ -269,7 +265,7 @@ export default function QuestionInput({
     return (
       <div className="space-y-4">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex items-center gap-2">
-          <span>💡</span>
+          <span></span>
           <span>
             Enter the rank number (1, 2, 3...) then press <b>Enter</b> or click
             outside.
@@ -278,10 +274,10 @@ export default function QuestionInput({
 
         <div className="space-y-2">
           {options.map((option) => {
-            // Thứ tự thực tế hiện tại
+ // Thứ tự thực tế hiện tại
             const realRank = currentOrderIds.indexOf(option.id) + 1;
 
-            // Giá trị hiển thị: Ưu tiên giá trị đang gõ (temp), nếu không thì lấy rank thật
+ // Giá trị hiển thị: Ưu tiên giá trị đang gõ (temp), nếu không thì lấy rank thật
             const displayValue =
               tempInputs[option.id] !== undefined
                 ? tempInputs[option.id]
@@ -338,13 +334,11 @@ export default function QuestionInput({
     );
   }
 
-  // ==============================
-  // 4. FILL IN BLANK (FIB)
-  // ==============================
+ // 4. FILL IN BLANK (FIB)
   if (question.question_type === "FIB") {
-    // Với FIB đơn giản (1 input), backend của bạn trả về correct_answer_text
-    // Nếu bạn muốn hỗ trợ nhiều chỗ trống, cần cấu trúc blanks.
-    // Dựa trên JSON: "correct_answer_text": "text" -> Chỉ có 1 ô input.
+ // Với FIB đơn giản (1 input), backend của bạn trả về correct_answer_text
+ // Nếu bạn muốn hỗ trợ nhiều chỗ trống, cần cấu trúc blanks.
+ // Dựa trên JSON: "correct_answer_text": "text" -> Chỉ có 1 ô input.
 
     return (
       <div className="space-y-3">
@@ -364,7 +358,7 @@ export default function QuestionInput({
 
   return (
     <div className="text-gray-500 italic p-4 bg-gray-50 rounded-lg border border-gray-200">
-      ⚠️ Unsupported question type: {question.question_type}
+      ️ Unsupported question type: {question.question_type}
     </div>
   );
 }

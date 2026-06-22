@@ -11,13 +11,6 @@ export default function OnlineTestDetailLoading() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
-        </div>
-
         <div className="rounded-xl bg-white shadow-xl overflow-hidden">
           <div className="h-14 bg-gray-100 border-b" />
           <TableSkeleton rows={8} cols={5} />

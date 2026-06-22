@@ -9,12 +9,18 @@ from django.utils.crypto import get_random_string
 from api.settings import default_error_messages 
 
 class customUserSerializer(serializers.ModelSerializer):
+    is_student = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ('username', 'date_of_birth', 'gender', 'email')  # Include the password field in the serializer
+        fields = ('id', 'username', 'date_of_birth', 'gender', 'email', 'avatar', 'full_name', 'is_student')
         extra_kwargs = {
             'password': {'write_only': True}
         }
+
+    def get_is_student(self, obj):
+        """Check if user is a student"""
+        return hasattr(obj, 'student_profile') and obj.student_profile is not None
 
 
 # class RegisterSerializer(ModelSerializer):
@@ -55,10 +61,11 @@ class customUserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(ModelSerializer):
     password = serializers.CharField(max_length=150, write_only=True)
     confirm_password = serializers.CharField(max_length=150, write_only=True)
+    full_name = serializers.CharField(max_length=100)
     
     class Meta:
         model = User
-        fields = ('username', 'date_of_birth', 'gender', 'email', 'password', 'confirm_password')
+        fields = ('username', 'full_name', 'date_of_birth', 'gender', 'email', 'password', 'confirm_password')
         extra_kwargs = {
             'password': {'write_only': True},
             'confirm_password': {'write_only': True}
@@ -112,6 +119,7 @@ class RegisterSerializer(ModelSerializer):
             email=validated_data['email'],
             date_of_birth=validated_data.get('date_of_birth'),
             gender=validated_data.get('gender'),
+            full_name=validated_data.get('full_name', ''),
         )
         user.set_password(validated_data['password'])
         user.is_authorized = True  # Auto-authorize user (or set to False if you want manual approval)
@@ -181,12 +189,15 @@ class PasswordResetSerializer(serializers.Serializer):
         return value
     
     def save(self):
+        from django.core.cache import cache
         email = self.validated_data['email']
         user = User.objects.get(email=email)
         otp = get_random_string(length=6, allowed_chars='0123456789')
-        user.login_token = otp
-        user.save()
-        return {'user':user, 'otp': otp}
+        
+        # Save OTP to Redis with a TTL of 120 seconds (2 minutes)
+        cache.set(f"password_reset_otp:{email}", otp, timeout=120)
+        
+        return {'user': user, 'otp': otp}
         
 class UserSerializer(serializers.ModelSerializer):
     is_student = serializers.SerializerMethodField()
@@ -266,6 +277,7 @@ class StudentRegisterSerializer(serializers.Serializer):
             username=validated_data['username'],
             email=validated_data['email'],
             date_of_birth=date_of_birth,
+            full_name=name,
         )
         user.set_password(validated_data['password'])
         user.is_authorized = True

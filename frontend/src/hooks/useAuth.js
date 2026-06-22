@@ -9,10 +9,10 @@ import {
 import {
   logoutUser,
   getUserInfo,
-  refreshToken,
   loginUser,
   loginStudent,
   registerUser,
+  updateUserInfo,
 } from "@/utils/auth.js";
 
 export const AuthContext = createContext(null);
@@ -24,35 +24,9 @@ export const AuthProvider = ({ children }) => {
   const [authError, setAuthError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = () => {
-    try {
-      setLoading(true);
-
-      const storedUser = localStorage.getItem("user");
-
-      if (!storedUser) {
-        clearAuth();
-        return;
-      }
-
-      const userData = JSON.parse(storedUser);
-      setUser(userData);
-      setIsAuthenticated(true);
-    } catch (err) {
-      console.error("Auth check failed:", err);
-      clearAuth();
-      localStorage.removeItem("user");
-      localStorage.removeItem("student");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const clearAuth = useCallback(() => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("student");
     setUser(null);
     setIsAuthenticated(false);
     setAuthError(null);
@@ -60,9 +34,9 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      setLoading(true);
       const userData = await getUserInfo();
       setUser(userData);
+      localStorage.setItem("user", JSON.stringify(userData));
       setIsAuthenticated(true);
       setAuthError(null);
       return userData;
@@ -76,10 +50,41 @@ export const AuthProvider = ({ children }) => {
         clearAuth();
       }
       return null;
-    } finally {
-      setLoading(false);
     }
   }, [clearAuth]);
+
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        setLoading(true);
+        // 1. Kiểm tra localStorage trước để hiển thị UI nhanh
+        const storedUser = localStorage.getItem("user");
+        let shouldValidateSession = false;
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            setUser(userData);
+            setIsAuthenticated(true);
+            shouldValidateSession = true;
+          } catch (e) {
+            console.error("Failed to parse stored user:", e);
+            localStorage.removeItem("user");
+          }
+        }
+
+        // 2. Luôn xác thực lại với server để đảm bảo session còn hạn
+        if (shouldValidateSession) {
+          await refreshUser();
+        }
+      } catch (err) {
+        console.error("Auth initialization failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+  }, [refreshUser]);
 
   const login = useCallback(
     async (credentials, isStudentLogin = false) => {
@@ -90,33 +95,22 @@ export const AuthProvider = ({ children }) => {
         let response = null;
 
         if (isStudentLogin) {
-          // Student login - Use loginStudent service
           const { identifier, password } = credentials;
-
           if (!identifier || !password) {
             throw new Error("Please enter both email/username and password");
           }
-
-          // Call loginStudent from utils/auth.js
           response = await loginStudent(identifier, password);
-
-          // Store student info
           if (response.student) {
             localStorage.setItem("student", JSON.stringify(response.student));
           }
         } else {
-          // ✅ Teacher login - Use loginUser service
           const { username, password } = credentials;
-
           if (!username || !password) {
             throw new Error("Please fill in all fields");
           }
-
-          // ✅ Call loginUser from utils/auth.js
           response = await loginUser(username, password);
         }
 
-        // ✅ Store user data for both teacher and student
         if (response && response.user) {
           localStorage.setItem("user", JSON.stringify(response.user));
           setUser(response.user);
@@ -183,9 +177,27 @@ export const AuthProvider = ({ children }) => {
     }
   }, [clearAuth]);
 
-  useEffect(() => {
-    refreshUser();
-  }, [refreshUser]);
+  const updateProfile = useCallback(
+    async (formData) => {
+      try {
+        setActionLoading(true);
+        setAuthError(null);
+        const response = await updateUserInfo(formData);
+        
+        // Update user state and localStorage
+        const updatedUser = { ...user, ...response };
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        return updatedUser;
+      } catch (error) {
+        setAuthError(error.message || "Failed to update profile");
+        throw error;
+      } finally {
+        setActionLoading(false);
+      }
+    },
+    [user]
+  );
 
   const contextValue = {
     user,
@@ -200,6 +212,7 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     register,
+    updateProfile,
   };
 
   return (

@@ -21,18 +21,54 @@ from django.views.generic import DetailView
 from rest_framework.renderers import JSONRenderer
 from django.http import JsonResponse
 
+ACCESS_TOKEN_MAX_AGE = int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds())
+REFRESH_TOKEN_MAX_AGE = int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds())
+
 class UserInfoView(APIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = customUserSerializer
-    # def get_object(self):
-    #     return self.request.user   
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+    
     def get(self, request):
         user = request.user
-        return Response({
-            "username": user.username,
-            "email": user.email,
-            # hoặc serialize user nếu muốn
-        }) 
+        # Fallback for Full Name if empty
+        if not user.full_name:
+            student = Student.objects.filter(user=user).first()
+            if student:
+                user.full_name = student.name
+            else:
+                user.full_name = user.username
+            user.save(update_fields=['full_name'])
+            
+        serializer = self.serializer_class(user, context={'request': request})
+        return Response(serializer.data)
+
+    def put(self, request):
+        user = request.user
+        
+        # Validate Avatar Size
+        avatar_file = request.FILES.get('avatar')
+        if avatar_file:
+            MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+            if avatar_file.size > MAX_AVATAR_SIZE:
+                return Response(
+                    {"detail": "Avatar file size exceeds 2MB limit."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        serializer = self.serializer_class(user, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Synchronize full_name with Student name if student profile exists
+            student = Student.objects.filter(user=user).first()
+            if student and user.full_name:
+                student.name = user.full_name
+                student.save(update_fields=['name'])
+                
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
         
 # View đăng ký
 class RegisterView(CreateAPIView):
@@ -64,6 +100,10 @@ class LoginView(APIView):
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "date_of_birth": user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else None,
+                "gender": user.gender,
+                "avatar": user.avatar.url if user.avatar else None,
+                "full_name": user.full_name,
                 "is_student": False,
             }
             
@@ -71,17 +111,23 @@ class LoginView(APIView):
                 "message": "Login successful",
                 "user": user_data
             }, status=status.HTTP_200_OK)
+            _secure = not settings.DEBUG
+            _samesite = 'None' if _secure else 'Lax'
             response.set_cookie(key = 'access_token',
                                 value = access_token,
                                 httponly = True,
-                                secure = True,
-                                samesite = 'None'
+                                secure = _secure,
+                                samesite = _samesite,
+                                path = '/',
+                                max_age = ACCESS_TOKEN_MAX_AGE
                                 )
             response.set_cookie(key = 'refresh_token',
                                 value = str(refresh),
                                 httponly = True,
-                                secure = True,
-                                samesite = 'None'
+                                secure = _secure,
+                                samesite = _samesite,
+                                path = '/',
+                                max_age = REFRESH_TOKEN_MAX_AGE
                                 )
             return response
         return Response(serializers.errors, status = status.HTTP_400_BAD_REQUEST)
@@ -127,11 +173,20 @@ class StudentLoginView(APIView):
         if not student:
             return Response({"detail": "No student profile linked to this account"}, status=status.HTTP_401_UNAUTHORIZED)
 
+        # Ensure full_name is populated from student name if blank
+        if not user.full_name:
+            user.full_name = student.name
+            user.save(update_fields=['full_name'])
+
         refresh = RefreshToken.for_user(user)
         user_data = {
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "date_of_birth": user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else None,
+            "gender": user.gender,
+            "avatar": user.avatar.url if user.avatar else None,
+            "full_name": user.full_name,
             "is_student": True,
         }
         
@@ -157,8 +212,10 @@ class StudentLoginView(APIView):
             "refresh": str(refresh)
         }, status = status.HTTP_200_OK)
 
-        response.set_cookie(key='access_token', value=str(refresh.access_token), httponly=True, secure=True, samesite='None', path='/')
-        response.set_cookie(key='refresh_token', value=str(refresh), httponly=True, secure=True, samesite='None', path='/')
+        _secure = not settings.DEBUG
+        _samesite = 'None' if _secure else 'Lax'
+        response.set_cookie(key='access_token', value=str(refresh.access_token), httponly=True, secure=_secure, samesite=_samesite, path='/')
+        response.set_cookie(key='refresh_token', value=str(refresh), httponly=True, secure=_secure, samesite=_samesite, path='/')
         return response
 class CookieTokenRefreshView(TokenRefreshView):
     authentication_classes = []
@@ -171,11 +228,15 @@ class CookieTokenRefreshView(TokenRefreshView):
             refresh = RefreshToken(refresh_token)
             access_token = str(refresh.access_token)
             response = Response({"access": access_token}, status=status.HTTP_200_OK)
+            _secure = not settings.DEBUG
+            _samesite = 'None' if _secure else 'Lax'
             response.set_cookie(key = 'access_token',
                                 value = access_token,
                                 httponly = True,
-                                secure = True,
-                                samesite = 'None'
+                                secure = _secure,
+                                samesite = _samesite,
+                                path = '/',
+                                max_age = ACCESS_TOKEN_MAX_AGE
                                 )
             return response
         except TokenError:
@@ -226,21 +287,25 @@ class LogoutAPIView(generics.GenericAPIView):
         response = Response({"message": "Logout successful"}, status=status.HTTP_205_RESET_CONTENT)
 
 
+        _secure = not settings.DEBUG
+        _samesite = 'None' if _secure else 'Lax'
         response.set_cookie(
             key='access_token',
             value='',
             path='/',
-            secure=True,
+            secure=_secure,
             httponly=True,
-            samesite='None',
+            samesite=_samesite,
+            max_age=0,
         )
         response.set_cookie(
             key='refresh_token',
             value='',
             path='/',
-            secure=True,
+            secure=_secure,
             httponly=True,
-            samesite='None',
+            samesite=_samesite,
+            max_age=0,
         )
 
         return response
@@ -248,6 +313,8 @@ class LogoutAPIView(generics.GenericAPIView):
 
 class PasswordResetOTPEmailView(generics.CreateAPIView):
     serializer_class = PasswordResetSerializer
+    permission_classes = (AllowAny,)
+    authentication_classes = []
 
     def create(self, request, *args, **kwargs):
         serializers = self.serializer_class(data=request.data)
@@ -255,17 +322,49 @@ class PasswordResetOTPEmailView(generics.CreateAPIView):
         email = serializers.validated_data['email']
         data = serializers.save()
         
-        confirmation_url_password_reset = f'http://localhost8000/reset-password-confirm/?email={email}'
+        confirmation_url_password_reset = f'http://localhost:3000/forgot-password?email={email}'
         
         #send an email with otp 
-        subject = 'Password Reset OTP and Confirmation Link'
-        message = f'Use this OTP to reset your password: {data["otp"]} and click on this link to reset your password: {confirmation_url_password_reset}'
-        message += f'Alternatively you can click here to reset your password: {confirmation_url_password_reset}'
+        subject = 'Password Reset OTP'
+        message = f'Use this OTP to reset your password: {data["otp"]}\n\nAlternatively, you can reset your password directly at: {confirmation_url_password_reset}'
         
         from_email = 'testgen@gmail.com'
         recipient_list = [email]
         send_mail(subject, message, from_email, recipient_list)  # Use send_mail instead of send_email
         return Response({"message": "Password reset link sent"}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmAPIView(APIView):
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+
+    def post(self, request):
+        from django.core.cache import cache
+        email = request.data.get('email')
+        otp = request.data.get('otp')
+        new_password = request.data.get('new_password')
+
+        if not email or not otp or not new_password:
+            return Response({"detail": "All fields (email, otp, new_password) are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get OTP from Redis cache
+        cached_otp = cache.get(f"password_reset_otp:{email}")
+        if not cached_otp or cached_otp != otp:
+            return Response({"detail": "Invalid or expired OTP code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retrieve user
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update password
+        user.set_password(new_password)
+        user.save()
+
+        # Delete the OTP from cache so it cannot be reused
+        cache.delete(f"password_reset_otp:{email}")
+
+        return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
     
     
 class PasswordResetConfirmView(generics.GenericAPIView):
@@ -318,8 +417,10 @@ class TokenLoginView(APIView):
         access_token = str(refresh.access_token)
 
         response = Response({"message": "Login successful"}, status=status.HTTP_200_OK)
-        response.set_cookie('access_token', access_token, httponly=True, secure=True, samesite='None')
-        response.set_cookie('refresh_token', str(refresh), httponly=True, secure=True, samesite='None')
+        _secure = not settings.DEBUG
+        _samesite = 'None' if _secure else 'Lax'
+        response.set_cookie('access_token', access_token, httponly=True, secure=_secure, samesite=_samesite, path='/')
+        response.set_cookie('refresh_token', str(refresh), httponly=True, secure=_secure, samesite=_samesite, path='/')
         return response
 
         
@@ -361,20 +462,22 @@ class StudentRegisterView(APIView):
             "student": student_data,
         }, status=status.HTTP_201_CREATED)
         
+        _secure = not settings.DEBUG
+        _samesite = 'None' if _secure else 'Lax'
         response.set_cookie(
             key='access_token',
             value=str(refresh.access_token),
             httponly=True,
-            secure=True,
-            samesite='None',
+            secure=_secure,
+            samesite=_samesite,
             path='/'
         )
         response.set_cookie(
             key='refresh_token',
             value=str(refresh),
             httponly=True,
-            secure=True,
-            samesite='None',
+            secure=_secure,
+            samesite=_samesite,
             path='/'
         )
         

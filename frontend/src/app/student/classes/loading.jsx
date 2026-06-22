@@ -34,7 +34,7 @@ export default function ClassesLoading() {
            <div className="h-12 w-full bg-gray-200 animate-pulse rounded-lg" />
         </div>
         <div className="bg-white rounded-xl shadow-lg p-0 border overflow-hidden">
-           <div className="h-16 bg-gradient-to-r from-purple-500 to-pink-600 opacity-50"></div>
+           <div className="h-16 bg-gradient-to-r from-blue-500 to-indigo-600 opacity-50"></div>
            <div className="p-6"><TableSkeleton rows={6} cols={6} /></div>
         </div>
       </div>

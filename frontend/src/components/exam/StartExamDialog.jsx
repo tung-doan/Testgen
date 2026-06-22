@@ -42,13 +42,13 @@ export default function StartExamDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+          <Button className="cursor-pointer" variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
           <Button
             onClick={onConfirm}
             disabled={loading}
-            className="bg-blue-600 text-white"
+            className="bg-blue-600 text-white cursor-pointer"
           >
             {loading ? "Starting..." : "Start Exam"}
           </Button>

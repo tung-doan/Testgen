@@ -1,0 +1,62 @@
+@startuml
+title SD Create Paper Test
+
+actor ": Teacher" as User
+
+boundary ": PaperTestManagementView" as View
+control ": PaperTestController" as Controller
+control ": OMRSheetGenerator" as Generator
+entity ": PaperTest" as Test
+entity ": PaperTestQuestion" as TestQuestion
+entity ": PaperTestVariant" as Variant
+
+' ===== 1. Khởi tạo Đề thi gốc =====
+User -> View : 1: createTest(data : Object) : void
+View -> Controller : 1.1: createTest(data : Object) : PaperTest
+
+Controller -> Test : 1.1.1: <<create>>\ncreate(data : Object) : PaperTest
+activate Test
+Controller <-- Test
+deactivate Test
+
+' ===== 1.1. Gắn danh sách câu hỏi vào đề =====
+Controller -> TestQuestion : 1.1.2: <<create>>\nbulkCreate(testQuestions : List) : List
+activate TestQuestion
+Controller <-- TestQuestion
+deactivate TestQuestion
+
+' ===== 1.2. Sinh các Mã đề (Variants) tự động =====
+Controller -> Controller : 1.1.3: generateTestVariants(test : PaperTest, numVariants : int) : void
+activate Controller
+loop for each num_variants
+    Controller -> Variant : 1.1.4: <<create>>\ncreateVariant(variantData : Object) : PaperTestVariant
+    activate Variant
+    Controller <-- Variant
+    deactivate Variant
+end
+deactivate Controller
+
+View <-- Controller
+User <-- View : 1.2: displaySuccess() : void
+
+' ===== 2. Tải toàn bộ file PDF các mã đề =====
+User -> View : 2: downloadAllVariants(testId : int) : void
+View -> Controller : 2.1: downloadAllVariants(testId : int) : File
+
+Controller -> Variant : 2.1.1: findAllByTestId() : List
+Controller <-- Variant
+
+loop for each Variant
+    ' ===== 2.1. Xây dựng nội dung câu hỏi đã trộn =====
+    Controller -> Generator : 2.1.2: buildVariantQuestions(variant : PaperTestVariant, allQuestions : Object) : List
+    Controller <-- Generator : questionsList
+
+    ' ===== 2.2. Vẽ file PDF =====
+    Controller -> Generator : 2.1.3: generateOMRSheet(title, variantCode, questionsList) : File
+    Controller <-- Generator : pdfFile
+end
+
+View <-- Controller : zipFile (Chứa các PDFs)
+User <-- View : 2.2: saveFileToComputer() : void
+
+@enduml

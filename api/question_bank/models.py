@@ -73,6 +73,13 @@ class Question(models.Model):
         help_text="Đáp án text cho Fill in the Blanks"
     )
     
+    # Ảnh đính kèm câu hỏi (từ Word hoặc upload thủ công)
+    image = models.URLField(
+        blank=True, 
+        null=True, 
+        help_text="URL ảnh đính kèm câu hỏi (Cloudinary)"
+    )
+    
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True, help_text="Soft delete flag")

@@ -56,49 +56,6 @@ const OnlineExamService = {
   },
 
   // Student Exam Taking
-  startExam: async (examId, studentId) => {
-    const response = await apiClient.post(
-      "online-exams/attempts/start-exam/",
-      {
-        exam_id: examId,
-        student_id: studentId,
-      }
-    );
-    return response.data;
-  },
-
-  submitExam: async (attemptId, answers) => {
-    const response = await apiClient.post(
-      `online-exams/attempts/${attemptId}/submit-exam/`,
-      { answers }
-    );
-    return response.data;
-  },
-
-  getAttemptResults: async (attemptId) => {
-    const response = await apiClient.get(
-      `online-exams/attempts/${attemptId}/results/`
-    );
-    return response.data;
-  },
-
-  getMyAttempts: async (studentId) => {
-    const response = await apiClient.get(
-      "online-exams/attempts/my-attempts/",
-      {
-        params: { student_id: studentId },
-      }
-    );
-    return response.data;
-  },
-
-  getAttemptDetail: async (attemptId) => {
-    const response = await apiClient.get(
-      `online-exams/attempts/${attemptId}/`
-    );
-    return response.data;
-  },
-
   getPendingExams: async (studentId) => {
     try {
       const response = await apiClient.get(
@@ -111,6 +68,7 @@ const OnlineExamService = {
       );
     }
   },
+
   getCompletedExams: (studentId) => {
     return apiClient.get(`online-exams/attempts/?student=${studentId}&status=COMPLETED`);
   },
@@ -143,6 +101,20 @@ const OnlineExamService = {
     }
   },
 
+  saveAnswers: async (attemptId, answers) => {
+    try {
+      const response = await apiClient.post(
+        `online-exams/attempts/${attemptId}/save-answers/`,
+        { answers }
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || "Failed to save answers"
+      );
+    }
+  },
+
   submitExam: async (attemptId, answers) => {
     try {
       const response = await apiClient.post(
@@ -153,6 +125,30 @@ const OnlineExamService = {
     } catch (error) {
       throw new Error(error.response?.data?.error || "Failed to submit exam");
     }
+  },
+
+  getAttemptResults: async (attemptId) => {
+    const response = await apiClient.get(
+      `online-exams/attempts/${attemptId}/results/`
+    );
+    return response.data;
+  },
+
+  getMyAttempts: async (studentId) => {
+    const response = await apiClient.get(
+      "online-exams/attempts/my-attempts/",
+      {
+        params: { student_id: studentId },
+      }
+    );
+    return response.data;
+  },
+
+  getAttemptDetail: async (attemptId) => {
+    const response = await apiClient.get(
+      `online-exams/attempts/${attemptId}/`
+    );
+    return response.data;
   },
 };
 

@@ -30,6 +30,8 @@ import {
   ArrowRight,
   X,
   LogOut,
+  Bell,
+  Loader2,
 } from "lucide-react";
 
 export default function StudentClasses() {
@@ -39,6 +41,9 @@ export default function StudentClasses() {
     getAllAvailableClassrooms,
     requestEnrollment,
     unenrollFromClassroom,
+    getMyInvitations,
+    getMyInvitationsCount,
+    handleInvitation,
   } = useClassroom();
 
   const [activeTab, setActiveTab] = useState("enrolled"); // "enrolled" | "browse"
@@ -58,10 +63,18 @@ export default function StudentClasses() {
   const [filterTeacherEmail, setFilterTeacherEmail] = useState("");
   const [currentPageEnrolled, setCurrentPageEnrolled] = useState(1);
   const [currentPageBrowse, setCurrentPageBrowse] = useState(1);
+
+  // Invitation states
+  const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
+  const [invitations, setInvitations] = useState([]);
+  const [invitationsCount, setInvitationsCount] = useState(0);
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
+  const [invitationActionId, setInvitationActionId] = useState(null);
   const itemsPerPage = 10;
 
   useEffect(() => {
     loadEnrolledClasses();
+    fetchInvitationsCount();
   }, []);
 
   useEffect(() => {
@@ -128,6 +141,47 @@ export default function StudentClasses() {
       alert(error.message || "Failed to send request");
     } finally {
       setRequestingId(null);
+    }
+  };
+
+  const fetchInvitationsCount = async () => {
+    try {
+      const count = await getMyInvitationsCount();
+      setInvitationsCount(count);
+    } catch (err) { /* silently fail */ }
+  };
+
+  const fetchInvitations = async () => {
+    try {
+      setInvitationsLoading(true);
+      const data = await getMyInvitations();
+      setInvitations(data);
+    } catch (err) {
+      console.error('Error fetching invitations:', err);
+    } finally {
+      setInvitationsLoading(false);
+    }
+  };
+
+  const openInvitationModal = () => {
+    setIsInvitationModalOpen(true);
+    fetchInvitations();
+  };
+
+  const handleInvitationAction = async (invitationId, action) => {
+    try {
+      setInvitationActionId(invitationId);
+      await handleInvitation(invitationId, action);
+      setInvitations(prev => prev.filter(i => i.id !== invitationId));
+      setInvitationsCount(prev => Math.max(0, prev - 1));
+      if (action === 'approve') {
+        const updatedData = await getMyEnrolledClassrooms();
+        setEnrolledData(updatedData);
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to handle invitation');
+    } finally {
+      setInvitationActionId(null);
     }
   };
 
@@ -259,13 +313,13 @@ export default function StudentClasses() {
       <Navbar />
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-indigo-50 py-8 px-4">
         <div className="max-w-7xl mx-auto space-y-8">
-          {/* Tab Switcher */}
-          <div className="flex gap-2 bg-white rounded-xl shadow-md p-1.5 mb-4">
+          {/* Tab Switcher with Invitation Badge */}
+          <div className="flex flex-col sm:flex-row gap-2 bg-white rounded-xl shadow-md p-1.5 mb-4">
             <button
               onClick={() => setActiveTab("enrolled")}
               className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg text-sm font-semibold transition-all duration-200 ${
                 activeTab === "enrolled"
-                  ? "bg-gradient-to-r from-purple-500 to-pink-600 text-white shadow-lg"
+                  ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg"
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -293,6 +347,18 @@ export default function StudentClasses() {
             >
               <Search className="h-4 w-4" />
               Browse All Classes
+            </button>
+            <button
+              onClick={openInvitationModal}
+              className="relative flex items-center cursor-pointer justify-center gap-2 py-3 px-5 rounded-lg text-sm font-semibold transition-all duration-200 text-gray-600 hover:bg-orange-50 border border-transparent hover:border-orange-200"
+            > 
+              <Bell className="h-4 w-4" />
+              Invitations
+              {invitationsCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold animate-pulse">
+                  {invitationsCount}
+                </span>
+              )}
             </button>
           </div>
 
@@ -325,7 +391,7 @@ export default function StudentClasses() {
                 </Card>
               ) : (
                 <Card className="border-0 shadow-xl overflow-hidden !p-0">
-                  <CardHeader className="bg-gradient-to-r from-purple-500 to-pink-600 text-white">
+                  <CardHeader className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
                     <div className="flex items-center justify-between p-2">
                       <div>
                         <CardTitle className="text-xl">
@@ -386,13 +452,25 @@ export default function StudentClasses() {
                                       </p>
                                     </td>
                                     <td className="px-6 py-4">
-                                      <div className="flex items-center gap-2">
-                                        <GraduationCap className="h-4 w-4 text-purple-600 flex-shrink-0" />
-                                        <p className="text-gray-700 text-sm truncate">
-                                          {classroom.teacher?.name || "N/A"}
-                                        </p>
-                                      </div>
-                                    </td>
+                                       <div className="flex items-center gap-2">
+                                         {classroom.teacher?.avatar ? (
+                                           <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-purple-100 flex items-center justify-center border border-purple-200 shadow-sm">
+                                             <img
+                                               src={classroom.teacher.avatar}
+                                               alt={classroom.teacher.name}
+                                               className="w-full h-full object-cover"
+                                             />
+                                           </div>
+                                         ) : (
+                                           <div className="w-8 h-8 rounded-full flex-shrink-0 bg-purple-100 flex items-center justify-center border border-purple-200 shadow-sm">
+                                             <GraduationCap className="h-4 w-4 text-purple-600" />
+                                           </div>
+                                         )}
+                                         <p className="text-gray-700 text-sm truncate font-medium">
+                                           {classroom.teacher?.name || "N/A"}
+                                         </p>
+                                       </div>
+                                     </td>
                                     <td className="px-6 py-4">
                                       <div className="flex items-center gap-2">
                                         <Mail className="h-4 w-4 text-gray-400 flex-shrink-0" />
@@ -462,8 +540,8 @@ export default function StudentClasses() {
                         </div>
                         {/* Pagination */}
                         {enrolledClassrooms.length > itemsPerPage && (
-                          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
-                            <p className="text-sm text-gray-600">
+                          <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 gap-4">
+                            <p className="text-sm text-gray-600 order-2 sm:order-1">
                               Showing{" "}
                               {(currentPageEnrolled - 1) * itemsPerPage + 1} to{" "}
                               {Math.min(
@@ -472,7 +550,7 @@ export default function StudentClasses() {
                               )}{" "}
                               of {enrolledClassrooms.length}
                             </p>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 order-1 sm:order-2">
                               <Button
                                 onClick={() =>
                                   setCurrentPageEnrolled((prev) =>
@@ -697,8 +775,20 @@ export default function StudentClasses() {
                                   </td>
                                   <td className="px-6 py-4">
                                     <div className="flex items-center gap-2">
-                                      <GraduationCap className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                                      <p className="text-gray-700 text-sm truncate">
+                                      {classroom.teacher_avatar ? (
+                                        <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-blue-100 flex items-center justify-center border border-blue-200 shadow-sm">
+                                          <img
+                                            src={classroom.teacher_avatar}
+                                            alt={classroom.teacher_name}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="w-8 h-8 rounded-full flex-shrink-0 bg-blue-100 flex items-center justify-center border border-blue-200 shadow-sm">
+                                          <GraduationCap className="h-4 w-4 text-blue-600" />
+                                        </div>
+                                      )}
+                                      <p className="text-gray-700 text-sm truncate font-medium">
                                         {classroom.teacher_name || "N/A"}
                                       </p>
                                     </div>
@@ -734,8 +824,8 @@ export default function StudentClasses() {
                       </div>
                       {/* Pagination */}
                       {filteredClassrooms.length > itemsPerPage && (
-                        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
-                          <p className="text-sm text-gray-600">
+                        <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 gap-4">
+                          <p className="text-sm text-gray-600 order-2 sm:order-1">
                             Showing {(currentPageBrowse - 1) * itemsPerPage + 1}{" "}
                             to{" "}
                             {Math.min(
@@ -744,7 +834,7 @@ export default function StudentClasses() {
                             )}{" "}
                             of {filteredClassrooms.length}
                           </p>
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 order-1 sm:order-2">
                             <Button
                               onClick={() =>
                                 setCurrentPageBrowse((prev) =>
@@ -850,6 +940,81 @@ export default function StudentClasses() {
                 : "Leave"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invitations Modal */}
+      <Dialog open={isInvitationModalOpen} onOpenChange={setIsInvitationModalOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="bg-orange-100 p-2 rounded-lg">
+                <Bell className="h-6 w-6 text-orange-600" />
+              </div>
+              <div>
+                <DialogTitle className="text-2xl font-semibold">
+                  Class Invitations
+                </DialogTitle>
+                <DialogDescription className="text-gray-600 mt-1">
+                  Teachers have invited you to join these classes
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="mt-4">
+            {invitationsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              </div>
+            ) : invitations.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <Bell className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                <p className="text-lg font-medium">No pending invitations</p>
+                <p className="text-sm mt-1">You'll see invitations from teachers here.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {invitations.map((inv) => (
+                  <div key={inv.id} className="flex items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-colors">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="bg-emerald-100 rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                        <GraduationCap className="h-5 w-5 text-emerald-700" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">{inv.classroom_name}</p>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                          <span className="flex items-center gap-1">
+                            <Users className="h-3 w-3" />{inv.teacher_name}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Mail className="h-3 w-3" />{inv.teacher_email}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Invited {new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                      <Button size="sm" onClick={() => handleInvitationAction(inv.id, 'approve')}
+                        disabled={invitationActionId === inv.id}
+                        className="bg-green-600 hover:bg-green-700 text-white shadow-sm hover:shadow-md transition-all cursor-pointer">
+                        {invitationActionId === inv.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle className="h-4 w-4 mr-1" />Accept</>}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleInvitationAction(inv.id, 'reject')}
+                        disabled={invitationActionId === inv.id}
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm cursor-pointer">
+                        <XCircle className="h-4 w-4 mr-1" />Decline
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end mt-4">
+            <Button className="cursor-pointer" variant="outline" onClick={() => setIsInvitationModalOpen(false)}>Close</Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>
