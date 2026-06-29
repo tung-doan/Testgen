@@ -161,7 +161,16 @@ export default function QuestionResultDisplay({ answer, index }) {
   const renderFIB = () => {
     const studentText = studentAnswer?.text || "";
     const correctText = question.correct_answer_text || "";
-    const isRight = studentText.trim().toLowerCase() === correctText.trim().toLowerCase();
+    
+    // Mirror backend logic: split by comma, trim, lowercase, check if student matches ANY
+    const acceptedAnswers = correctText
+      .split(",")
+      .map((ans) => ans.trim())
+      .filter((ans) => ans.length > 0);
+    
+    const isRight = acceptedAnswers.some(
+      (ans) => studentText.trim().toLowerCase() === ans.toLowerCase()
+    );
 
     return (
       <div className="space-y-4">
@@ -173,8 +182,14 @@ export default function QuestionResultDisplay({ answer, index }) {
         </div>
         {!isRight && (
            <div className="p-4 rounded-lg border border-green-200 bg-green-50">
-                <p className="text-sm font-semibold text-green-600 mb-1">Correct Answer:</p>
-                <p className="text-xl font-bold text-green-800">{correctText}</p>
+                <p className="text-sm font-semibold text-green-600 mb-1">Accepted Answers:</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {acceptedAnswers.map((ans, i) => (
+                    <span key={i} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-green-100 text-green-800 border border-green-200">
+                      {ans}
+                    </span>
+                  ))}
+                </div>
            </div>
         )}
       </div>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -37,8 +38,8 @@ import {
   Upload,
   Filter,
   AlertCircle,
-  CheckCircle,
-  Info,
+  Loader2,
+  Plus,
   Trash2,
   Check,
   Minus,
@@ -54,6 +55,32 @@ const QUESTION_TYPES = [
   { value: "ORD", label: "Ordering" },
   { value: "FIB", label: "Fill in Blank" },
 ];
+
+const MANUAL_QUESTION_TYPES = QUESTION_TYPES.filter((type) => type.value !== "ALL");
+
+const createDefaultOptions = (type) => {
+  if (type === "FIB") return [];
+
+  const baseOptions =
+    type === "ORD"
+      ? ["First item", "Second item", "Third item"]
+      : ["", "", "", ""];
+
+  return baseOptions.map((text, index) => ({
+    text,
+    is_correct_bool: type === "MC" ? index === 0 : type === "TFE" ? true : null,
+    correct_order: type === "ORD" ? index + 1 : null,
+    order: index,
+  }));
+};
+
+const createDefaultManualQuestion = (type = "MC") => ({
+  question_type: type,
+  prompt: "",
+  image: "",
+  correct_answer_text: "",
+  options: createDefaultOptions(type),
+});
 
 export default function SectionQuestions({ params }) {
   const { id } = use(params);
@@ -81,6 +108,14 @@ export default function SectionQuestions({ params }) {
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState(null);
 
+ // Manual create states
+  const [isManualOpen, setIsManualOpen] = useState(false);
+  const [manualQuestion, setManualQuestion] = useState(createDefaultManualQuestion());
+  const [manualImageFile, setManualImageFile] = useState(null);
+  const [manualImagePreviewUrl, setManualImagePreviewUrl] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState(null);
+
  // Delete states
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
@@ -93,6 +128,18 @@ export default function SectionQuestions({ params }) {
   const showNotification = (message, type = "success") => {
     setNotification({ show: true, message, type });
   };
+
+  useEffect(() => {
+    if (!manualImageFile) {
+      setManualImagePreviewUrl("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(manualImageFile);
+    setManualImagePreviewUrl(previewUrl);
+
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [manualImageFile]);
 
   useEffect(() => {
     loadQuestions();
@@ -287,6 +334,172 @@ export default function SectionQuestions({ params }) {
     setUploadError(null);
   };
 
+  const closeManualDialog = () => {
+    setIsManualOpen(false);
+    setManualQuestion(createDefaultManualQuestion());
+    setManualImageFile(null);
+    setManualImagePreviewUrl("");
+    setManualError(null);
+  };
+
+  const handleManualTypeChange = (questionType) => {
+    setManualQuestion((prev) => ({
+      ...createDefaultManualQuestion(questionType),
+      image: prev.image,
+    }));
+    setManualError(null);
+  };
+
+  const updateManualOption = (index, updates) => {
+    setManualQuestion((prev) => ({
+      ...prev,
+      options: prev.options.map((option, optionIndex) =>
+        optionIndex === index ? { ...option, ...updates } : option,
+      ),
+    }));
+  };
+
+  const addManualOption = () => {
+    setManualQuestion((prev) => ({
+      ...prev,
+      options: [
+        ...prev.options,
+        {
+          text: "",
+          is_correct_bool: prev.question_type === "TFE" ? true : false,
+          correct_order: prev.question_type === "ORD" ? prev.options.length + 1 : null,
+          order: prev.options.length,
+        },
+      ],
+    }));
+  };
+
+  const removeManualOption = (index) => {
+    setManualQuestion((prev) => ({
+      ...prev,
+      options: prev.options
+        .filter((_, optionIndex) => optionIndex !== index)
+        .map((option, optionIndex) => ({
+          ...option,
+          order: optionIndex,
+          correct_order:
+            prev.question_type === "ORD"
+              ? optionIndex + 1
+              : option.correct_order,
+        })),
+    }));
+  };
+
+  const validateManualQuestion = () => {
+    const prompt = manualQuestion.prompt.trim();
+    if (!prompt) return "Question prompt is required.";
+
+    if (manualImageFile) {
+      if (!manualImageFile.type.startsWith("image/")) {
+        return "Only image files are accepted.";
+      }
+      if (manualImageFile.size > 5 * 1024 * 1024) {
+        return "Image size must be 5MB or smaller.";
+      }
+    }
+
+    if (manualQuestion.question_type === "FIB") {
+      return manualQuestion.correct_answer_text.trim()
+        ? null
+        : "Correct answer is required for fill-in-the-blank questions.";
+    }
+
+    const filledOptions = manualQuestion.options.filter((option) => option.text.trim());
+    if (filledOptions.length < 2) return "Please enter at least two options/statements.";
+
+    if (manualQuestion.question_type === "MC") {
+      return filledOptions.some((option) => option.is_correct_bool)
+        ? null
+        : "Please mark at least one correct answer.";
+    }
+
+    if (manualQuestion.question_type === "ORD") {
+      const orders = filledOptions.map((option) => Number(option.correct_order));
+      const uniqueOrders = new Set(orders);
+      const validOrders = orders.every((order) => Number.isInteger(order) && order >= 1);
+      const isSequentialFromOne =
+        validOrders &&
+        uniqueOrders.size === orders.length &&
+        orders.every((order) => order <= filledOptions.length) &&
+        Array.from({ length: filledOptions.length }, (_, index) => index + 1).every(
+          (expectedOrder) => uniqueOrders.has(expectedOrder),
+        );
+
+      return isSequentialFromOne
+        ? null
+        : `Ordering positions must be consecutive from 1 to ${filledOptions.length}.`;
+    }
+
+    return null;
+  };
+
+  const handleCreateManualQuestion = async () => {
+    const validationError = validateManualQuestion();
+    if (validationError) {
+      setManualError(validationError);
+      return;
+    }
+
+    try {
+      setManualSaving(true);
+      setManualError(null);
+
+      let imageUrl = manualQuestion.image;
+      if (manualImageFile) {
+        const imageFormData = new FormData();
+        imageFormData.append("image", manualImageFile);
+        const imageResponse = await QuestionBankService.uploadQuestionImage(imageFormData);
+        imageUrl = imageResponse.data.image_url;
+      }
+
+      const payload = {
+        section: Number(id),
+        question_type: manualQuestion.question_type,
+        prompt: manualQuestion.prompt.trim(),
+        image: imageUrl || null,
+      };
+
+      if (manualQuestion.question_type === "FIB") {
+        payload.correct_answer_text = manualQuestion.correct_answer_text.trim();
+      } else {
+        payload.options = manualQuestion.options
+          .filter((option) => option.text.trim())
+          .map((option, index) => ({
+            text: option.text.trim(),
+            is_correct_bool:
+              manualQuestion.question_type === "MC" || manualQuestion.question_type === "TFE"
+                ? Boolean(option.is_correct_bool)
+                : null,
+            correct_order:
+              manualQuestion.question_type === "ORD"
+                ? Number(option.correct_order)
+                : null,
+            order: index,
+          }));
+      }
+
+      await QuestionBankService.createQuestion(payload);
+      showNotification("Question created successfully!");
+      closeManualDialog();
+      await loadQuestions();
+    } catch (err) {
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.detail ||
+        err.message ||
+        "Failed to create question";
+      setManualError(msg);
+      showNotification("Failed to create question: " + msg, "error");
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
   const getTypeColor = (type) => {
     const colors = {
       MC: "bg-blue-100 text-blue-800",
@@ -373,6 +586,13 @@ export default function SectionQuestions({ params }) {
                     <Trash2 className="h-4 w-4" />
                   </Button>
                   <Button
+                    onClick={() => setIsManualOpen(true)}
+                    className="bg-white/20 hover:bg-white/30 text-white border border-white/30 cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Question
+                  </Button>
+                  <Button
                     onClick={() => setIsUploadOpen(true)}
                     className="bg-white/20 hover:bg-white/30 text-white border border-white/30 cursor-pointer"
                   >
@@ -457,11 +677,18 @@ export default function SectionQuestions({ params }) {
                 <div className="text-center py-12 text-gray-500">
                   <p className="text-lg">No questions in this section yet</p>
                   <p className="text-sm mt-2">
-                    Upload a Word document to add questions
+                    Add a question manually or upload a Word document
                   </p>
                   <Button
+                    onClick={() => setIsManualOpen(true)}
+                    className="mt-4 mr-2 bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Question
+                  </Button>
+                  <Button
                     onClick={() => setIsUploadOpen(true)}
-                    className="mt-4 bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
+                    className="mt-4 bg-green-600 hover:bg-green-700 cursor-pointer"
                   >
                     <Upload className="h-4 w-4 mr-2" />
                     Upload Questions
@@ -627,6 +854,273 @@ export default function SectionQuestions({ params }) {
           </Card>
         </div>
       </div>
+
+      {/* Manual Question Dialog */}
+      <Dialog open={isManualOpen} onOpenChange={(open) => (open ? setIsManualOpen(true) : closeManualDialog())}>
+        <DialogContent className="sm:max-w-[960px] max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Add Question Manually</DialogTitle>
+            {sectionInfo && (
+              <p className="text-sm text-gray-500">
+                Adding to:{" "}
+                <span className="font-medium text-indigo-600">
+                  {sectionInfo.subject} - {sectionInfo.chapter} - {sectionInfo.name}
+                </span>
+              </p>
+            )}
+          </DialogHeader>
+
+          {manualError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{manualError}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-2">
+              <div>
+                <Label htmlFor="manualType">Question Type *</Label>
+                <select
+                  id="manualType"
+                  value={manualQuestion.question_type}
+                  onChange={(event) => handleManualTypeChange(event.target.value)}
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400 cursor-pointer"
+                >
+                  {MANUAL_QUESTION_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="manualImage">Question Image</Label>
+                <Input
+                  key={manualImageFile ? "manual-image-selected" : "manual-image-empty"}
+                  id="manualImage"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    setManualImageFile(event.target.files?.[0] || null);
+                    setManualQuestion((prev) => ({ ...prev, image: "" }));
+                  }}
+                  className="mt-1 cursor-pointer"
+                />
+                {manualImagePreviewUrl ? (
+                  <div className="mt-3 flex items-start gap-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <img
+                      src={manualImagePreviewUrl}
+                      alt="Question image preview"
+                      className="h-24 w-32 rounded-md border border-gray-200 bg-white object-contain"
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <p className="truncate text-sm font-medium text-gray-700">
+                        {manualImageFile?.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {((manualImageFile?.size || 0) / 1024 / 1024).toFixed(2)}MB
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setManualImageFile(null)}
+                        className="h-8 cursor-pointer"
+                      >
+                        Remove Image
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Optional. JPG, PNG, GIF, or WebP up to 5MB.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="manualPrompt">Question Prompt *</Label>
+              <Textarea
+                id="manualPrompt"
+                value={manualQuestion.prompt}
+                onChange={(event) =>
+                  setManualQuestion((prev) => ({ ...prev, prompt: event.target.value }))
+                }
+                placeholder="Enter the question content"
+                rows={8}
+                maxLength={20000}
+                style={{ fieldSizing: "fixed" }}
+                className="min-h-52 w-full max-w-full resize-y leading-relaxed"
+              />
+            </div>
+
+            {manualQuestion.question_type === "FIB" ? (
+              <div className="space-y-2">
+                <Label htmlFor="manualCorrectText">Correct Answer *</Label>
+                <Textarea
+                  id="manualCorrectText"
+                  value={manualQuestion.correct_answer_text}
+                  onChange={(event) =>
+                    setManualQuestion((prev) => ({
+                      ...prev,
+                      correct_answer_text: event.target.value,
+                    }))
+                  }
+                  placeholder="Enter the expected answer"
+                  rows={4}
+                  maxLength={5000}
+                  style={{ fieldSizing: "fixed" }}
+                  className="min-h-32 w-full max-w-full resize-y leading-relaxed"
+                />
+                <p className="text-xs text-gray-500">
+                  You can store multiple accepted answers by separating them with commas. Example: Hanoi, Ha Noi, Hà Nội
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-7 pt-1">
+                <div className="flex items-center justify-between border-t border-gray-100 pt-6 pb-2">
+                  <Label>
+                    {manualQuestion.question_type === "TFE"
+                      ? "Statements"
+                      : manualQuestion.question_type === "ORD"
+                        ? "Items"
+                        : "Answer Options"}
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addManualOption}
+                    className="cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Option
+                  </Button>
+                </div>
+
+                <div className="space-y-10">
+                {manualQuestion.options.map((option, index) => (
+                  <div
+                    key={index}
+                    className={`space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4 ${
+                      index > 0 ? "mt-8" : ""
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <Label className="text-xs text-gray-500">
+                        Option {index + 1}
+                      </Label>
+                      <Textarea
+                        value={option.text}
+                        onChange={(event) => updateManualOption(index, { text: event.target.value })}
+                        placeholder={`Option ${index + 1}`}
+                        rows={3}
+                        maxLength={10000}
+                        style={{ fieldSizing: "fixed" }}
+                        className="min-h-24 w-full max-w-full resize-y bg-white leading-relaxed"
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-1">
+                      {manualQuestion.question_type === "ORD" ? (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">
+                            Correct position
+                          </Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={option.correct_order ?? ""}
+                            onChange={(event) =>
+                              updateManualOption(index, {
+                                correct_order: event.target.value ? Number(event.target.value) : "",
+                              })
+                            }
+                            className="w-36 bg-white"
+                          />
+                        </div>
+                      ) : manualQuestion.question_type === "TFE" ? (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">
+                            Correct value
+                          </Label>
+                          <select
+                            value={option.is_correct_bool ? "true" : "false"}
+                            onChange={(event) =>
+                              updateManualOption(index, {
+                                is_correct_bool: event.target.value === "true",
+                              })
+                            }
+                            className="w-40 h-10 px-3 rounded-md border border-gray-200 bg-white text-sm"
+                          >
+                            <option value="true">True</option>
+                            <option value="false">False</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <label className="flex h-10 items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(option.is_correct_bool)}
+                            onChange={(event) =>
+                              updateManualOption(index, {
+                                is_correct_bool: event.target.checked,
+                              })
+                            }
+                            className="h-4 w-4"
+                          />
+                          Correct answer
+                        </label>
+                      )}
+
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => removeManualOption(index)}
+                          disabled={manualQuestion.options.length <= 2}
+                          className="h-10 px-3 cursor-pointer"
+                          title="Remove option"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500 mr-1" />
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeManualDialog} className="cursor-pointer">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateManualQuestion}
+              disabled={manualSaving}
+              className="bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
+            >
+              {manualSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Question
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Upload Dialog */}
       <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>

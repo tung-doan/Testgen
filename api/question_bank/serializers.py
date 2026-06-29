@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 from .models import Subject, Chapter, Section, Question, AnswerOption
+from .duplicate_utils import find_duplicate_question
 
 class SubjectSerializer(serializers.ModelSerializer):
     chapter_count = serializers.SerializerMethodField()
@@ -144,6 +145,27 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
         if request and value.chapter.subject.created_by != request.user:
             raise serializers.ValidationError("You don't have permission to add questions to this section.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        section = attrs.get('section')
+        prompt = attrs.get('prompt', '')
+        question_type = attrs.get('question_type')
+        options_data = attrs.get('options', [])
+
+        if question_type == Question.QuestionType.FILL_IN_BLANK:
+            options_texts = [attrs.get('correct_answer_text', '')]
+        else:
+            options_texts = [option.get('text', '') for option in options_data]
+
+        duplicate = find_duplicate_question(section, prompt, options_texts)
+        if duplicate:
+            raise serializers.ValidationError({
+                "duplicate": "This question already exists in this section.",
+                "duplicate_question_id": duplicate.id,
+            })
+
+        return attrs
     
     def create(self, validated_data):
         options_data = validated_data.pop('options', [])

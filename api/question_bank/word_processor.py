@@ -5,11 +5,11 @@ With validation, error reporting, and image extraction
 """
 import docx
 import re
-import hashlib
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from django.db import transaction
 from question_bank.models import Question, AnswerOption
+from question_bank.duplicate_utils import build_existing_fingerprint_set, compute_fingerprint
 
 try:
     from docx.oxml.ns import qn
@@ -25,24 +25,6 @@ except ImportError:
 
 MAX_FILE_SIZE_MB = 10
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-
-
-def normalize_text(text):
-    """Normalize text for comparison: lowercase, collapse whitespace."""
-    if not text:
-        return ""
-    return re.sub(r'\s+', ' ', text.strip().lower())
-
-
-def compute_fingerprint(prompt, options_texts):
-    """
-    Compute MD5 fingerprint from prompt + sorted options.
-    This allows O(1) duplicate detection via set lookup.
-    """
-    normalized_prompt = normalize_text(prompt)
-    normalized_options = sorted([normalize_text(t) for t in options_texts])
-    raw = f"{normalized_prompt}|{'|'.join(normalized_options)}"
-    return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
 
 def upload_image_to_cloudinary(image_blob, content_type='image/png'):
@@ -525,23 +507,7 @@ def process_word_document(file_path, section, user):
             return result
         
         # 3. Build fingerprint set for deduplication
-        existing_qs = section.questions.filter(is_active=True).values_list('id', 'prompt')
-        existing_opts = AnswerOption.objects.filter(
-            question__section=section, question__is_active=True
-        ).values_list('question_id', 'text')
-        
-        # Group options by question_id
-        opts_by_q = {}
-        for q_id, opt_text in existing_opts:
-            if q_id not in opts_by_q:
-                opts_by_q[q_id] = []
-            opts_by_q[q_id].append(opt_text)
-            
-        existing_fingerprints = set()
-        for q_id, prompt in existing_qs:
-            opts_texts = opts_by_q.get(q_id, [])
-            fp = compute_fingerprint(prompt, opts_texts)
-            existing_fingerprints.add(fp)
+        existing_fingerprints = build_existing_fingerprint_set(section)
         
         batch_fingerprints = set()
         

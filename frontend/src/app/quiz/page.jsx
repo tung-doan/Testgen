@@ -243,6 +243,9 @@ export default function TestSummary() {
                           Test Name
                         </TableHead>
                         <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4">
+                          Class
+                        </TableHead>
+                        <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4">
                           Participants
                         </TableHead>
                         <TableHead className="font-semibold text-gray-600 text-xs uppercase tracking-wider px-6 py-4">
@@ -271,6 +274,15 @@ export default function TestSummary() {
                         >
                           <TableCell className="px-6 py-4 font-medium text-gray-900">
                             {test.title}
+                          </TableCell>
+                          <TableCell className="px-6 py-4 text-gray-600">
+                            {test.classroom ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                {test.classroom}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
                           </TableCell>
                           <TableCell className="px-6 py-4">
                             <span className="inline-flex items-center gap-1.5 text-gray-700">

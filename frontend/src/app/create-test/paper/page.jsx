@@ -63,7 +63,7 @@ export default function CreatePaperTest() {
     setNotification({ show: true, message, type });
   };
 
- // Form data
+  // Form data
   const [testData, setTestData] = useState({
     title: "",
     description: "",
@@ -73,33 +73,33 @@ export default function CreatePaperTest() {
     num_variants: 1,
   });
 
- // Question Bank data
+  // Question Bank data
   const [subjects, setSubjects] = useState([]);
   const [chapters, setChapters] = useState([]);
   const [sections, setSections] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
 
- // Selected filters
+  // Selected filters
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
 
- // Selected questions
+  // Selected questions
   const [selectedQuestions, setSelectedQuestions] = useState([]);
 
- // Question search filter
+  // Question search filter
   const [questionSearchTerm, setQuestionSearchTerm] = useState("");
 
- // Random selection
+  // Random selection
   const [randomCount, setRandomCount] = useState("");
   const [showRandomInput, setShowRandomInput] = useState(false);
 
- // PDF Preview
+  // PDF Preview
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
 
- // Load initial data
+  // Load initial data
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -163,8 +163,10 @@ export default function CreatePaperTest() {
   const loadQuestions = async (sectionId) => {
     try {
       const data = await fetchQuestions({ section_id: sectionId });
- // CHỈ LẤY MC VÀ CÓ ĐÚNG 4 ĐÁP ÁN (Dành cho thi giấy OMR)
-      const mcQuestions = data.filter((q) => q.question_type === "MC" && q.option_count === 4);
+      // CHỈ LẤY MC VÀ CÓ ĐÚNG 4 ĐÁP ÁN (Dành cho thi giấy OMR)
+      const mcQuestions = data.filter(
+        (q) => q.question_type === "MC" && q.option_count === 4,
+      );
       setQuestions(mcQuestions);
     } catch (err) {
       console.error("Error loading questions:", err);
@@ -207,7 +209,7 @@ export default function CreatePaperTest() {
       return;
     }
 
- // Calculate available questions (not already selected) from current section
+    // Calculate available questions (not already selected) from current section
     const currentSelectedIds = new Set(
       selectedQuestions.map((q) => String(q.id)),
     );
@@ -216,7 +218,7 @@ export default function CreatePaperTest() {
       (q) => !currentSelectedIds.has(String(q.id)),
     );
 
- // If all questions in section are already selected
+    // If all questions in section are already selected
     if (availableQuestions.length === 0) {
       showNotification(
         "All questions in this section are already selected",
@@ -227,20 +229,20 @@ export default function CreatePaperTest() {
       return;
     }
 
- // Calculate actual count to add (min of requested or available)
+    // Calculate actual count to add (min of requested or available)
     const actualCount = Math.min(count, availableQuestions.length);
 
- // Shuffle and select from available questions
+    // Shuffle and select from available questions
     const shuffled = [...availableQuestions].sort(() => Math.random() - 0.5);
     const randomQuestions = shuffled.slice(0, actualCount);
 
- // Update state by merging new questions with existing
+    // Update state by merging new questions with existing
     setSelectedQuestions((currentSelectedQuestions) => [
       ...currentSelectedQuestions,
       ...randomQuestions,
     ]);
 
- // Show smart notification
+    // Show smart notification
     if (count > availableQuestions.length) {
       showNotification(
         `Only ${availableQuestions.length} question(s) available in this section. Added all ${actualCount} question(s).`,
@@ -473,8 +475,6 @@ export default function CreatePaperTest() {
                     </SelectContent>
                   </Select>
                 </div>
-
-
 
                 {/* NUMBER OF VARIANTS */}
                 <div>

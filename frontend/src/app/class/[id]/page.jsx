@@ -32,7 +32,6 @@ import {
   Users,
   Award,
   Calendar,
-  IdCard,
   FileText,
   TrendingUp,
   AlertCircle,
@@ -759,10 +758,6 @@ export default function ClassroomDetail({ params }) {
                           {req.student_name}
                         </p>
                         <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
-                          <span className="flex items-center gap-1">
-                            <IdCard className="h-3 w-3" />
-                            {req.student_id_code}
-                          </span>
                           {req.student_email && (
                             <span className="flex items-center gap-1">
                               <Mail className="h-3 w-3" />

@@ -198,6 +198,18 @@ export default function StudentClasses() {
       await unenrollFromClassroom(selectedClassroomForLeave.id);
       const updatedData = await getMyEnrolledClassrooms();
       setEnrolledData(updatedData);
+      setAllClassrooms((prev) =>
+        prev.map((classroom) =>
+          classroom.id === selectedClassroomForLeave.id
+            ? {
+                ...classroom,
+                enrollment_status: null,
+                student_count: Math.max((classroom.student_count || 1) - 1, 0),
+              }
+            : classroom,
+        ),
+      );
+      setHasFetchedBrowse(false);
       setShowLeaveDialog(false);
       setSelectedClassroomForLeave(null);
     } catch (error) {

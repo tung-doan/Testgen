@@ -98,7 +98,7 @@ export default function Statistic() {
     const values = [];
     const bgColors = [];
     const borderColors = [];
-    const types = []; // store type for tooltip
+    const details = []; // store breakdown for tooltip
     
     data.class_averages.forEach(c => {
       const paperScore = c.avg_score_paper || 0;
@@ -106,21 +106,31 @@ export default function Statistic() {
       const hasPaper = paperScore > 0;
       const hasOnline = onlineScore > 0;
       
-      if (hasPaper) {
-        labels.push(hasOnline ? `${c.class_name} (Paper)` : c.class_name);
-        values.push(paperScore);
-        bgColors.push("rgba(99,102,241,0.7)"); // Purple
-        borderColors.push("rgba(99,102,241,1)");
-        types.push("Paper");
+      if (!hasPaper && !hasOnline) return; // skip classes with no data
+
+      // Calculate combined average
+      let combinedAvg = 0;
+      if (hasPaper && hasOnline) {
+        combinedAvg = Math.round(((paperScore + onlineScore) / 2) * 100) / 100;
+      } else if (hasPaper) {
+        combinedAvg = paperScore;
+      } else {
+        combinedAvg = onlineScore;
       }
-      
-      if (hasOnline) {
-        labels.push(hasPaper ? `${c.class_name} (Online)` : c.class_name);
-        values.push(onlineScore);
-        bgColors.push("rgba(16,185,129,0.7)"); // Green
-        borderColors.push("rgba(16,185,129,1)");
-        types.push("Online");
-      }
+
+      labels.push(c.class_name);
+      values.push(combinedAvg);
+      bgColors.push(
+        combinedAvg >= 7 ? "rgba(16,185,129,0.7)" :  // Green for good
+        combinedAvg >= 5 ? "rgba(250,204,21,0.7)" :  // Yellow for average
+        "rgba(239,68,68,0.7)"                         // Red for low
+      );
+      borderColors.push(
+        combinedAvg >= 7 ? "rgba(16,185,129,1)" :
+        combinedAvg >= 5 ? "rgba(250,204,21,1)" :
+        "rgba(239,68,68,1)"
+      );
+      details.push({ paper: paperScore, online: onlineScore, hasPaper, hasOnline });
     });
 
     if (values.length === 0) {
@@ -143,7 +153,7 @@ export default function Statistic() {
       labels,
       datasets: [
         {
-          label: "Average Score",
+          label: "Combined Average Score",
           data: values,
           backgroundColor: bgColors,
           borderColor: borderColors,
@@ -152,7 +162,7 @@ export default function Statistic() {
           maxBarThickness: 45,
         }
       ],
-      meta: types
+      meta: details
     };
   }, [data]);
 
@@ -347,16 +357,7 @@ export default function Statistic() {
                       Average Score by Class
                     </CardTitle>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      <span
-                        className="inline-block w-3 h-3 rounded-sm mr-1"
-                        style={{ backgroundColor: "rgba(99,102,241,0.7)" }}
-                      />
-                      Paper
-                      <span
-                        className="inline-block w-3 h-3 rounded-sm ml-3 mr-1"
-                        style={{ backgroundColor: "rgba(16,185,129,0.7)" }}
-                      />
-                      Online
+                      Combined average of Paper & Online tests
                     </p>
                   </div>
                 </div>
@@ -375,10 +376,15 @@ export default function Statistic() {
                             ...baseBarOptions.plugins.tooltip,
                             callbacks: {
                               title: (items) => items[0].label,
-                              label: (item) => ` Average score: ${item.raw}`,
+                              label: (item) => ` Combined Average: ${item.raw}`,
                               afterLabel: (item) => {
-                                const type = classChartData.meta[item.dataIndex];
-                                return type ? `Type: ${type}` : "";
+                                const detail = classChartData.meta[item.dataIndex];
+                                if (!detail) return "";
+                                const lines = [];
+                                if (detail.hasPaper) lines.push(`  Paper: ${detail.paper}`);
+                                if (detail.hasOnline) lines.push(`  Online: ${detail.online}`);
+                                if (detail.hasPaper && detail.hasOnline) lines.push(`  (Average of both)`);
+                                return lines.join("\n");
                               },
                             },
                           },

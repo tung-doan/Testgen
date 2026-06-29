@@ -71,6 +71,11 @@ const QuestionBankService = {
   },
 
   createQuestion: (data) => apiClient.post("question-bank/questions/", data),
+  uploadQuestionImage: (formData) =>
+    apiClient.post("question-bank/questions/upload-image/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 30000,
+    }),
   updateQuestion: (id, data) =>
     apiClient.put(`question-bank/questions/${id}/`, data),
 

@@ -9,7 +9,7 @@ from .serializers import (
     SectionSerializer, QuestionSerializer,
     QuestionCreateSerializer, QuestionDetailSerializer
 )
-from .word_processor import process_word_document
+from .word_processor import process_word_document, upload_image_to_cloudinary
 import os
 import tempfile
 import shutil
@@ -139,6 +139,47 @@ class QuestionViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['post'], url_path='upload-image')
+    def upload_image(self, request):
+        """Upload a question image and return its Cloudinary URL."""
+        image_file = request.FILES.get('image')
+        max_file_size = 5 * 1024 * 1024  # 5MB
+
+        if not image_file:
+            return Response(
+                {"error": "Image file is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if image_file.size == 0:
+            return Response(
+                {"error": "Image file is empty"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if image_file.size > max_file_size:
+            size_mb = round(image_file.size / (1024 * 1024), 1)
+            return Response(
+                {"error": f"Image size ({size_mb}MB) exceeds the 5MB limit"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        content_type = getattr(image_file, 'content_type', '') or ''
+        if not content_type.startswith('image/'):
+            return Response(
+                {"error": "Only image files are accepted"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        image_url = upload_image_to_cloudinary(image_file.read(), content_type)
+        if not image_url:
+            return Response(
+                {"error": "Failed to upload image"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response({"image_url": image_url}, status=status.HTTP_201_CREATED)
     
     @action(detail=False, methods=['post'], url_path='upload-questions')
     def upload_questions(self, request):
