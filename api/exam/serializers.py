@@ -4,9 +4,18 @@ from classrooms.models import Classroom
 from question_bank.models import Question
 from question_bank.serializers import QuestionDetailSerializer
 from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
 import random
 
 User = get_user_model()
+
+
+def has_multiple_correct_answers(questions):
+    return any(
+        getattr(question, 'correct_option_count', 0) > 1
+        for question in questions
+    )
+
 class PaperTestQuestionSerializer(serializers.ModelSerializer):
     question_detail = QuestionDetailSerializer(source='question', read_only=True)
     
@@ -63,11 +72,23 @@ class TestCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         questions_ids = validated_data.pop('questions', [])
         num_variants = validated_data.pop('num_variants', 1)
+        validated_data.pop('allow_multiple_answers', None)
         validated_data['num_questions'] = len(questions_ids)
+        questions = {
+            q.id: q
+            for q in Question.objects.filter(id__in=questions_ids).annotate(
+                correct_option_count=Count(
+                    'options',
+                    filter=Q(options__is_correct_bool=True)
+                )
+            )
+        }
+        validated_data['allow_multiple_answers'] = has_multiple_correct_answers(
+            questions.values()
+        )
  # Tạo test
         test = PaperTest.objects.create(**validated_data)   
  # Thêm câu hỏi vào test (batch fetch + bulk create)
-        questions = {q.id: q for q in Question.objects.filter(id__in=questions_ids)}
         test_questions = [
             PaperTestQuestion(test=test, question=questions[qid], order=idx)
             for idx, qid in enumerate(questions_ids, start=1)
@@ -80,6 +101,7 @@ class TestCreateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         questions_ids = validated_data.pop('questions', None)
+        validated_data.pop('allow_multiple_answers', None)
         
  # Cập nhật các trường cơ bản
         for attr, value in validated_data.items():
@@ -93,10 +115,21 @@ class TestCreateSerializer(serializers.ModelSerializer):
             
  # Cập nhật num_questions
             instance.num_questions = len(questions_ids)
+            questions = {
+                q.id: q
+                for q in Question.objects.filter(id__in=questions_ids).annotate(
+                    correct_option_count=Count(
+                        'options',
+                        filter=Q(options__is_correct_bool=True)
+                    )
+                )
+            }
+            instance.allow_multiple_answers = has_multiple_correct_answers(
+                questions.values()
+            )
             instance.save()
             
  # Thêm câu hỏi mới (batch fetch + bulk create)
-            questions = {q.id: q for q in Question.objects.filter(id__in=questions_ids)}
             test_questions = [
                 PaperTestQuestion(test=instance, question=questions[qid], order=idx)
                 for idx, qid in enumerate(questions_ids, start=1)

@@ -1166,7 +1166,7 @@ def _detect_answers_v2(thresh, template, y_corrections, bubble_radius, num_quest
         if min_fill > dynamic_min_fill:
             min_fill = dynamic_min_fill
 
-        fill_ratio = 1.3
+        background_ratio = 1.6
 
  # Block-level alignment using precomputed ring_response
         best_dx, best_dy = _align_block_xy(ring_response, block, y_corrections, bubble_radius)
@@ -1222,13 +1222,20 @@ def _detect_answers_v2(thresh, template, y_corrections, bubble_radius, num_quest
                 choice_fills.append(fill)
 
             max_fill = max(choice_fills) if choice_fills else 0
-            median_fill = float(np.median(choice_fills)) if choice_fills else 0
-            baseline = max(median_fill, 2.0)
-            threshold = max(min_fill, max_fill * 0.40)
+            lowest_fill = min(choice_fills) if choice_fills else 0
+            baseline = max(lowest_fill, 2.0)
+            has_clear_empty = lowest_fill < max_fill * 0.40
+
+            # A real mark should be close enough to the darkest mark in the
+            # row. This keeps erased/light residue from being selected while
+            # still allowing multi-answer rows such as A+B+C.
+            threshold = max(min_fill, max_fill * 0.55)
+            if has_clear_empty:
+                threshold = max(threshold, baseline * background_ratio)
             
             selected = []
             for ci, fill in enumerate(choice_fills):
-                if fill >= threshold and fill >= baseline * fill_ratio:
+                if fill >= threshold:
                     selected.append(ci)
 
             detected_answers[q_idx] = selected
@@ -1543,7 +1550,8 @@ def _save_grading_comparison(detected_answers, answer_key, num_questions,
 
 def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
                         detected_answers, answer_key, num_questions,
-                        correct_count, total_questions):
+                        correct_count, total_questions,
+                        allow_multiple_answers=True):
     """
     Draw transparent green/red overlay on the warped color image.
 
@@ -1587,7 +1595,6 @@ def draw_graded_overlay(paper, template, y_corrections, bubble_radius,
 
             user_selected = set(detected_answers.get(q_idx, []))
             correct_set = set(answer_key.get(q_idx, []))
-
             num_gaps = row // block_size if block_size > 0 else 0
             expected_y = origin_y + row * gap_y + num_gaps * block_gap_y
             actual_y = _get_calibrated_y(expected_y, y_corrections)
@@ -1711,7 +1718,13 @@ def process_submission_local(submission_id, local_image_path):
 
                 correct_indices_set = set(answer_key.get(question_index, []))
                 user_indices_set = set(user_answer_indices)
-                is_correct = (correct_indices_set == user_indices_set) and len(user_indices_set) > 0
+                if not test.allow_multiple_answers and len(user_indices_set) > 1:
+                    is_correct = False
+                else:
+                    is_correct = (
+                        correct_indices_set == user_indices_set
+                        and len(user_indices_set) > 0
+                    )
                 if is_correct:
                     correct_count += 1
 
@@ -1744,7 +1757,8 @@ def process_submission_local(submission_id, local_image_path):
         graded_image = draw_graded_overlay(
             paper, template, y_corrections, bubble_radius,
             detected_answers, answer_key, test.num_questions,
-            correct_count, total_questions
+            correct_count, total_questions,
+            allow_multiple_answers=test.allow_multiple_answers
         )
         _save_debug("debug_graded_result.jpg", graded_image)
 
