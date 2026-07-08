@@ -163,6 +163,28 @@ export function useClassroom() {
     [],
   );
 
+  const removeStudentFromClassroom = useCallback(
+    async (classroomId, studentId) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiClient.post(
+          `classroom/${classroomId}/remove_student/`,
+          { student_id: studentId }
+        );
+        return response.data;
+      } catch (err) {
+        const errorMsg =
+          err.response?.data?.error || "Failed to remove student";
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
   // ============================================
   // Teacher Invitation Methods
   // ============================================
@@ -387,6 +409,7 @@ export function useClassroom() {
     deleteClassroom,
     getStudents,
     deleteStudent,
+    removeStudentFromClassroom,
     getClassroomStudentInfo,
     // Teacher invitation
     inviteStudent,

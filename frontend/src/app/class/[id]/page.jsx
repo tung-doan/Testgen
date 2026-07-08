@@ -56,7 +56,7 @@ export default function ClassroomDetail({ params }) {
     getClassroomById,
     getStudents,
     inviteStudent,
-    deleteStudent,
+    removeStudentFromClassroom,
     getEnrollmentRequests,
     getEnrollmentRequestsCount,
     handleEnrollmentRequest,
@@ -198,7 +198,7 @@ export default function ClassroomDetail({ params }) {
 
   const handleDeleteStudent = async (studentId) => {
     try {
-      await deleteStudent(studentId);
+      await removeStudentFromClassroom(id, studentId);
       setStudents(students.filter((student) => student.id !== studentId));
       showNotification("Student removed from class.");
     } catch (err) {

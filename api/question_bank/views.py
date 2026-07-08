@@ -2,7 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q, Prefetch, Count
+from django.db.models import Q, Prefetch, Count, ProtectedError
 from .models import Subject, Chapter, Section, Question, AnswerOption
 from .serializers import (
     SubjectSerializer, ChapterSerializer, 
@@ -26,6 +26,15 @@ class SubjectViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"error": "Cannot delete this subject because it contains questions. Please delete all questions first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=True, methods=['get'])
     def chapters(self, request, pk=None):
@@ -53,6 +62,15 @@ class ChapterViewSet(viewsets.ModelViewSet):
         return queryset.select_related('subject').annotate(
             section_count=Count('sections', distinct=True)
         )
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"error": "Cannot delete this chapter because it contains questions. Please delete all questions first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=True, methods=['get'])
     def sections(self, request, pk=None):
@@ -80,6 +98,15 @@ class SectionViewSet(viewsets.ModelViewSet):
         return queryset.select_related('chapter__subject').annotate(
             question_count=Count('questions', filter=Q(questions__is_active=True))
         )
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"error": "Cannot delete this section because it contains questions. Please delete all questions first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=True, methods=['get'])
     def questions(self, request, pk=None):

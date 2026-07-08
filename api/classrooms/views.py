@@ -49,6 +49,23 @@ class ClassroomViewSet(viewsets.ModelViewSet):
 
         serializer = StudentSerializer(students_data, many=True, context={'classroom_id': classroom.id})
         return Response(serializer.data, status=status.HTTP_200_OK)
+        
+    @action(detail=True, methods=['post'], url_path='remove_student')
+    def remove_student(self, request, pk=None):
+        classroom = self.get_object()
+        if classroom.teacher != request.user:
+            return Response({"error": "You are not authorized to modify this class."}, status=status.HTTP_403_FORBIDDEN)
+            
+        student_id = request.data.get('student_id')
+        if not student_id:
+            return Response({"error": "student_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        student = get_object_or_404(Student, id=student_id)
+        if classroom in student.classrooms.all():
+            student.classrooms.remove(classroom)
+            EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
+            return Response({"message": "Student removed from class"}, status=status.HTTP_200_OK)
+        return Response({"error": "Student not in this classroom"}, status=status.HTTP_400_BAD_REQUEST)
     
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -152,10 +169,6 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # Cleanup enrollment request rows to allow future re-join requests
         EnrollmentRequest.objects.filter(student=student, classroom=classroom).delete()
-        
-        # If student has no more classrooms, optionally delete
-        if not student.classrooms.exists():
-            student.delete()
             
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -196,15 +209,21 @@ class StudentViewSet(viewsets.ModelViewSet):
     
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        classroom = instance.classrooms.first()
-        if classroom and classroom.teacher != self.request.user:
+        
+        # Lấy tất cả các lớp của giáo viên này mà sinh viên đang tham gia
+        classrooms = instance.classrooms.filter(teacher=self.request.user)
+        
+        if not classrooms.exists():
             return Response(
-                {"error": "You are not authorized to delete this student."}, 
+                {"error": "You are not authorized to modify this student."}, 
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        PaperSubmission.objects.filter(student=instance).delete()
-        self.perform_destroy(instance)
+        # Xóa sinh viên khỏi các lớp của giáo viên này
+        for classroom in classrooms:
+            instance.classrooms.remove(classroom)
+            EnrollmentRequest.objects.filter(student=instance, classroom=classroom).delete()
+            
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
