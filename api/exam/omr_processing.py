@@ -140,6 +140,27 @@ def     get_paper_transform(image_path):
         pts = docCnt.reshape(4, 2)
         paper_pass1 = four_point_transform(image, pts)
         gray_pass1 = four_point_transform(gray, pts)
+
+        # four_point_transform only orders corners geometrically; it does not
+        # know that the OMR template is portrait.  A photo taken with the
+        # paper's long edge running horizontally therefore produces a
+        # landscape warp, and Pass 2 subsequently labels the four markers
+        # against the wrong page orientation.
+        #
+        # Always normalize the rough warp to portrait before marker
+        # refinement.  Counter-clockwise is used as the deterministic first
+        # orientation.  If that leaves the sheet upside down, the existing
+        # 180-degree Student ID retry later in the pipeline handles it.
+        if paper_pass1.shape[1] > paper_pass1.shape[0]:
+            paper_pass1 = cv2.rotate(
+                paper_pass1, cv2.ROTATE_90_COUNTERCLOCKWISE
+            )
+            gray_pass1 = cv2.rotate(
+                gray_pass1, cv2.ROTATE_90_COUNTERCLOCKWISE
+            )
+            detection_method += " + portrait_rotation"
+            print("[OMR] Pass 1 landscape warp rotated 90 degrees to portrait")
+
         print(f"[OMR] Pass 1 warped: {gray_pass1.shape[1]}x{gray_pass1.shape[0]}")
     else:
         print("[OMR] WARNING: No paper contour. Using full image.")
@@ -1064,6 +1085,15 @@ def _detect_digits_v2(thresh, block, y_corrections, bubble_radius, debug_name=No
     gap_y = block['gap_y']
     fill_ratio = block.get('thresholds', {}).get('fill_ratio', 1.5)
 
+    # TEST ID has only three columns and is validated against the variants
+    # belonging to the current test later in the pipeline. Camera perspective
+    # near this small block can make a genuinely filled bubble only slightly
+    # darker than its neighbours (for example 85 vs a 57.5 median). A 1.5
+    # ratio rejects that case by a very small margin, so use a conservative
+    # block-specific ratio without weakening Student ID/answer detection.
+    if block.get('label') == 'TEST ID':
+        fill_ratio = min(fill_ratio, 1.4)
+
     detected = []
     sampling_radius = max(5.0, bubble_radius * 0.7)
     col_shifts = []
@@ -1386,6 +1416,70 @@ def detect_all_from_image(image_path, test):
     mssv_digits = _detect_digits_v2(
         thresh, sid_block, y_corrections, bubble_radius,
         debug_name="debug_grid_mssv_v2.jpg"
+    )
+
+    # Always inspect the opposite portrait direction. An upside-down answer
+    # grid can otherwise be mistaken for valid Student ID digits.
+    orientation_tid_block = get_block(template, 'test_id')
+    upright_tid = _detect_digits_v2(
+        thresh, orientation_tid_block, y_corrections, bubble_radius,
+        debug_name="debug_grid_variant_orientation.jpg"
+    )
+    upright_code = ''.join(d for d in upright_tid if d is not None)
+    upright_variant_ok = (
+        all(d is not None for d in upright_tid)
+        and PaperTestVariant.objects.filter(
+            test=test, variant_code=upright_code
+        ).exists()
+    )
+
+    paper_180 = cv2.rotate(paper, cv2.ROTATE_180)
+    warped_180 = cv2.rotate(warped, cv2.ROTATE_180)
+    thresh_180 = cv2.rotate(thresh, cv2.ROTATE_180)
+    corrections_180 = _calibrate_timing_marks(thresh_180, template)
+    mssv_180 = _detect_digits_v2(
+        thresh_180, sid_block, corrections_180, bubble_radius,
+        debug_name="debug_grid_mssv_orientation_180.jpg"
+    )
+    tid_180 = _detect_digits_v2(
+        thresh_180, orientation_tid_block, corrections_180, bubble_radius,
+        debug_name="debug_grid_variant_orientation_180.jpg"
+    )
+    code_180 = ''.join(d for d in tid_180 if d is not None)
+    variant_180_ok = (
+        all(d is not None for d in tid_180)
+        and PaperTestVariant.objects.filter(
+            test=test, variant_code=code_180
+        ).exists()
+    )
+
+    upright_score = (
+        int(upright_variant_ok), sum(d is not None for d in upright_tid),
+        sum(d is not None for d in mssv_digits), len(y_corrections),
+    )
+    score_180 = (
+        int(variant_180_ok), sum(d is not None for d in tid_180),
+        sum(d is not None for d in mssv_180), len(corrections_180),
+    )
+    if OMR_DEBUG:
+        print(f"[OMR] Orientation scores: upright={upright_score}, "
+              f"rotated={score_180}")
+
+    if score_180 > upright_score:
+        print("[OMR] 180-degree orientation selected")
+        paper, warped, thresh = paper_180, warped_180, thresh_180
+        y_corrections, mssv_digits = corrections_180, mssv_180
+    else:
+        print("[OMR] Original portrait orientation selected")
+
+    # Pass 2 debug files intentionally show the raw geometric warp. Save the
+    # selected logical orientation separately so debugging does not suggest
+    # that the 180-degree decision was ignored.
+    _save_debug("debug_orientation_selected.jpg", paper)
+    _save_debug("debug_thresh_selected.jpg", thresh)
+    _detect_digits_v2(
+        thresh, sid_block, y_corrections, bubble_radius,
+        debug_name="debug_grid_mssv_selected.jpg"
     )
 
  # --- AUTO-ROTATION 180° ---
